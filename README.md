@@ -24,7 +24,7 @@ different terminals. `tui-users` puts them on one screen, in the
 ### Any distribution, static binary
 
 ```sh
-curl -fsSL https://github.com/tui-tools/tui-users/releases/download/v{version}/tui-users_{version}_linux_amd64.tar.gz | tar -xz tui-users
+curl -fsSL https://github.com/tui-tools/tui-users/releases/download/v0.1.0/tui-users_0.1.0_linux_amd64.tar.gz | tar -xz tui-users
 sudo install -m0755 tui-users /usr/local/bin/tui-users
 ```
 
