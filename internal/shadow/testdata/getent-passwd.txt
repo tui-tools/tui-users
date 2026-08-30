@@ -1,0 +1,8 @@
+root:x:0:0:Super User:/root:/bin/bash
+bin:x:1:1:bin:/bin:/usr/sbin/nologin
+daemon:x:2:2:daemon:/sbin:/usr/sbin/nologin
+sshd:x:74:74:Privilege-separated SSH:/usr/share/empty.sshd:/usr/sbin/nologin
+postgres:x:26:26:PostgreSQL Server:/var/lib/pgsql:/bin/bash
+toolbox:x:0:0:second root:/var/lib/toolbox:/bin/bash
+alice:x:1000:1000:Alice Moreira:/home/alice:/bin/bash
+bob:x:1001:1001:Bob Tavares,,,:/home/bob:/bin/zsh

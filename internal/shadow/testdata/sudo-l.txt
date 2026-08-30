@@ -1,0 +1,6 @@
+Matching Defaults entries for alice on host:
+    !visiblepw, always_set_home, match_group_by_gid
+
+User alice may run the following commands on host:
+    (ALL) ALL
+    (ALL) NOPASSWD: /usr/bin/systemctl restart nginx

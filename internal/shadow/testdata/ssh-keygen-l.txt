@@ -1,0 +1,3 @@
+256 SHA256:Aa0fixturefingerprintforthefirstkey00000000 alice@laptop (ED25519)
+3072 SHA256:Bb1fixturefingerprintforthesecondkey0000000 alice@old-desktop (RSA)
+256 SHA256:Cc2fixturefingerprintfortherestrictedkey000 backup@runner (ED25519)

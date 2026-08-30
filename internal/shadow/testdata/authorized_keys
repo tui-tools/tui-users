@@ -1,0 +1,5 @@
+# Alice's keys
+
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJk3fixturekey0000000000000000000000000 alice@laptop
+ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQDfixtureoldkey000000000000 alice@old-desktop
+no-pty,command="/usr/bin/backup" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJk3restricted00000000000000000000 backup@runner

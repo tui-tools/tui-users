@@ -1,12 +1,12 @@
 {
   "schemaVersion": 1,
-  "name": "tui-template",
-  "binary": "tui-template",
-  "tagline": "A working skeleton for a new tui-tools tool",
-  "description": "The starting point for a new tool in the family. Press **Use this template**, rename it, replace one package, and you have a tool that looks and behaves like the rest.\n\nIt is not a pile of TODOs: it is a working tool. It lists the files in a directory and can update a file's timestamp, which is deliberately trivial — what matters is the shape around it, and that shape is already correct: the action table that generates the key map, the help screen and the confirm dialog; the backend interface with a real and a fake implementation; `--demo`; CI; and GoReleaser.\n\nThis `tool.json` is itself the example. It is a valid manifest, validated against [the schema](https://github.com/tui-tools/tui-kit/blob/main/schema/tool.schema.json) on every CI run, and the values are the ones you replace.",
-  "category": "template",
-  "homepage": "https://github.com/tui-tools/tui-template",
-  "repo": "https://github.com/tui-tools/tui-template",
+  "name": "tui-users",
+  "binary": "tui-users",
+  "tagline": "Accounts, groups, keys and sudo, with every change previewed before it runs",
+  "description": "A terminal UI for the machine's local accounts. It lists every account with the facts that decide what it can do — uid, primary group, groups, shell, last login, whether the password is usable, locked or missing — and puts the ones worth a second look at the top, with the reason: a second account with uid 0, an empty password, a service account with a login shell.\n\nOpen an account and you get the whole picture: its aging policy in words rather than in days-since-1970, the authorized keys in its `~/.ssh` with their fingerprints, what `sudo` says it may run, and its open sessions. A second screen lists the groups with their real membership, primary members included; a third quotes every rule in `/etc/sudoers` and `/etc/sudoers.d`, marking the ones that run without a password.\n\nChanges are previewed: creating an account, deleting it, locking it, setting a password, editing group membership, changing the shell, setting an expiry, adding or removing an authorized key. A password never reaches a command line — it goes to `chpasswd` on standard input.\n\nRun `tui-users --demo` to drive a sample machine: every key works and nothing touches your system.",
+  "category": "users",
+  "homepage": "https://github.com/tui-tools/tui-users",
+  "repo": "https://github.com/tui-tools/tui-users",
   "license": "MIT",
   "platforms": [
     "linux/amd64",
@@ -16,30 +16,70 @@
   "logo": "assets/logo.png",
   "screenshots": [
     {
-      "path": "docs/screenshots/tui-template-main.png",
-      "caption": "The list: the four bands every tool in the family draws"
+      "path": "docs/screenshots/tui-users-main.png",
+      "caption": "The accounts table, findings first: uid 0 twice, an empty password, a service account with a shell"
     },
     {
-      "path": "docs/screenshots/tui-template-touch.png",
-      "caption": "The confirm dialog, showing the exact command line before it runs"
+      "path": "docs/screenshots/tui-users-detail.png",
+      "caption": "One account in full: groups, aging, authorized keys with fingerprints, sudo rules and open sessions"
     },
     {
-      "path": "docs/screenshots/tui-template-help.png",
-      "caption": "The help screen, generated from the action table"
+      "path": "docs/screenshots/tui-users-groups.png",
+      "caption": "The groups, with the members /etc/group does not list: the accounts whose primary group it is"
+    },
+    {
+      "path": "docs/screenshots/tui-users-sudoers.png",
+      "caption": "Every rule in /etc/sudoers and /etc/sudoers.d, with the passwordless ones marked"
+    },
+    {
+      "path": "docs/screenshots/tui-users-key.png",
+      "caption": "Adding an authorized key: the diff of the file, then the commands that apply it"
+    },
+    {
+      "path": "docs/screenshots/tui-users-help.png",
+      "caption": "The help screen, generated from the same key table as the hint bar"
     }
   ],
   "keys": [
     {
-      "key": "t",
-      "action": "Touch the selected file"
+      "key": "enter",
+      "action": "Open the selected account or group"
+    },
+    {
+      "key": "tab",
+      "action": "Move between accounts, groups and sudo rules"
+    },
+    {
+      "key": "n / D",
+      "action": "Create an account / delete one, with or without its home"
+    },
+    {
+      "key": "l",
+      "action": "Lock or unlock the account's password"
+    },
+    {
+      "key": "p",
+      "action": "Set a password, never echoed and never in a command line"
+    },
+    {
+      "key": "a / x",
+      "action": "Add the account to a group / remove it from one"
+    },
+    {
+      "key": "s",
+      "action": "Change the login shell"
+    },
+    {
+      "key": "e",
+      "action": "Set the account expiry and the password lifetime"
+    },
+    {
+      "key": "K",
+      "action": "Add an authorized key, or remove one, with a diff to confirm"
     },
     {
       "key": "/",
-      "action": "Filter the list"
-    },
-    {
-      "key": "r / ctrl+r",
-      "action": "Re-read the directory"
+      "action": "Filter the screen across every column"
     },
     {
       "key": "?",
@@ -52,84 +92,129 @@
   ],
   "backends": [
     {
-      "name": "coreutils",
-      "binary": "touch",
-      "versionCommand": [
-        "touch",
-        "--version"
-      ],
-      "versionRegex": "coreutils\\) ([0-9][0-9.]*)",
-      "minimum": "8.0",
+      "name": "shadow-utils",
+      "binary": "useradd",
+      "minimum": "4.8",
       "searchPaths": [
-        "/usr/bin/touch",
-        "/bin/touch"
+        "/usr/sbin/useradd",
+        "/sbin/useradd",
+        "/usr/bin/useradd"
+      ],
+      "notes": [
+        {
+          "range": ">=4.8",
+          "impact": "shadow-utils prints no version from any of its programs: `useradd --version`, `chage --version` and every sibling answer \"unrecognized option\" on Arch, Debian and Fedora alike. This backend therefore declares no version command, and the header shows none for it"
+        },
+        {
+          "range": ">=4.8",
+          "impact": "the minimum above is informative, not enforced: it is the release whose flags this tool uses (`useradd -r -m -G`, `usermod -L -U -s`, `userdel -r`, `gpasswd -a -d`, `chage -E -M -l`), all far older than any supported distribution"
+        },
+        {
+          "range": ">=4.8",
+          "impact": "reading the lock state and the expiry of an account needs `getent shadow`, which needs root; an unprivileged run lists every account and says the password state is unknown rather than implying it is fine"
+        }
+      ]
+    },
+    {
+      "name": "openssh",
+      "binary": "ssh-keygen",
+      "versionCommand": [
+        "ssh",
+        "-V"
+      ],
+      "versionRegex": "OpenSSH_([0-9]+\\.[0-9]+)",
+      "minimum": "8.2",
+      "searchPaths": [
+        "/usr/bin/ssh-keygen",
+        "/bin/ssh-keygen"
       ],
       "features": [
         {
-          "name": "no-dereference",
-          "since": "8.1"
+          "name": "security-keys",
+          "since": "8.2"
         }
       ],
       "notes": [
         {
-          "range": "<8.1",
-          "impact": "`touch -h` is missing, so the timestamp of a symlink is set on its target instead of on the link"
+          "range": "<8.2",
+          "impact": "`ssh-keygen -l` does not know the `sk-` key types, so a FIDO security key in an authorized_keys file cannot be fingerprinted and adding one is warned about: sshd would ignore the line it wrote"
+        },
+        {
+          "range": "<6.8",
+          "impact": "`ssh-keygen -l` prints MD5 fingerprints rather than SHA256, so the fingerprint column will not match what a modern `ssh-keygen -lf` shows elsewhere"
         }
       ]
     }
   ],
   "install": {
-    "source": {
-      "available": true,
-      "command": "git clone https://github.com/tui-tools/tui-template\ncd tui-template && make demo",
-      "url": "https://github.com/tui-tools/tui-template",
-      "note": "Or press \"Use this template\" on GitHub, which is the point of it."
-    },
     "pacman": {
       "available": false,
-      "package": "tui-template",
+      "package": "tui-users",
       "repo": "tui-tools",
       "requires_repo_setup": true,
-      "command": "sudo pacman -S tui-template",
+      "command": "sudo pacman -S tui-users",
       "url": "https://pkgs.tui.tools/arch",
-      "note": "The template is never packaged. This entry shows your tool's shape."
+      "note": "Add the tui-tools repository to pacman.conf first."
+    },
+    "aur": {
+      "available": false,
+      "package": "tui-users-bin",
+      "repo": "aur",
+      "command": "paru -S tui-users-bin",
+      "url": "https://aur.archlinux.org/packages/tui-users-bin",
+      "note": "The -bin package installs the released static binary."
     },
     "apt": {
       "available": false,
-      "package": "tui-template",
+      "package": "tui-users",
       "repo": "tui-tools",
       "requires_repo_setup": true,
-      "command": "sudo apt install tui-template",
+      "command": "sudo apt install tui-users",
       "url": "https://pkgs.tui.tools/deb",
-      "note": "The template is never packaged. This entry shows your tool's shape."
+      "note": "Add the tui-tools apt repository and its keyring first."
     },
     "dnf": {
       "available": false,
-      "package": "tui-template",
+      "package": "tui-users",
       "repo": "tui-tools",
       "requires_repo_setup": true,
-      "command": "sudo dnf install tui-template",
+      "command": "sudo dnf install tui-users",
       "url": "https://pkgs.tui.tools/rpm",
-      "note": "The template is never packaged. This entry shows your tool's shape."
+      "note": "Add the tui-tools.repo file first."
+    },
+    "zypper": {
+      "available": false,
+      "package": "tui-users",
+      "repo": "tui-tools",
+      "requires_repo_setup": true,
+      "command": "sudo zypper install tui-users",
+      "url": "https://pkgs.tui.tools/rpm",
+      "note": "Add the tui-tools repository first."
     },
     "binary": {
-      "available": false,
-      "pattern": "tui-template_{version}_linux_{arch}.tar.gz",
-      "command": "curl -fsSL https://github.com/tui-tools/tui-template/releases/download/v{version}/tui-template_{version}_linux_{arch}.tar.gz | tar -xz tui-template\nsudo install -m0755 tui-template /usr/local/bin/tui-template",
-      "url": "https://github.com/tui-tools/tui-template/releases",
-      "note": "The template is never released. Your tool is, once you tag v0.1.0."
+      "available": true,
+      "pattern": "tui-users_{version}_linux_{arch}.tar.gz",
+      "command": "curl -fsSL https://github.com/tui-tools/tui-users/releases/download/v{version}/tui-users_{version}_linux_{arch}.tar.gz | tar -xz tui-users\nsudo install -m0755 tui-users /usr/local/bin/tui-users",
+      "url": "https://github.com/tui-tools/tui-users/releases",
+      "note": "One static binary. Verify it against checksums.txt from the same release."
+    },
+    "source": {
+      "available": true,
+      "command": "git clone https://github.com/tui-tools/tui-users\ncd tui-users && make build\nsudo install -m0755 bin/tui-users /usr/local/bin/tui-users",
+      "url": "https://github.com/tui-tools/tui-users",
+      "note": "Needs Go 1.27 or newer."
     }
   },
   "security": {
-    "needs_sudo": "Only the touch action escalates, and only when the configured prefix is non-empty. Listing a directory is an ordinary read. Replace this sentence with what your own tool escalates for.",
+    "needs_sudo": "Most reads are unprivileged: getent passwd, getent group, lastlog and loginctl answer to any user. `sudo -n`, which never prompts, covers three reads — /etc/shadow, the sudoers files and another account's chage -l — and every change.",
     "preview_before_run": true,
     "no_daemon": true,
     "no_network": true,
     "static_binary": true,
     "signed_releases": false,
     "config_paths": [
-      "/etc/tui-template/config.toml",
-      "~/.config/tui-template/config.toml"
+      "/etc/tui-users/config.toml",
+      "~/.config/tui-users/config.toml"
     ]
   },
   "maintainers": [
@@ -140,10 +225,16 @@
   ],
   "since": "2026-08-29",
   "keywords": [
-    "template",
-    "scaffold",
-    "bubbletea",
-    "starter"
-  ],
-  "unreleased": true
+    "users",
+    "accounts",
+    "groups",
+    "shadow-utils",
+    "useradd",
+    "sudo",
+    "sudoers",
+    "authorized_keys",
+    "ssh",
+    "tui",
+    "bubbletea"
+  ]
 }

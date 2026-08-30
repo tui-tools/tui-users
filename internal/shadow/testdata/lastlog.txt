@@ -1,0 +1,5 @@
+Username         Port     From                                       Latest
+root             pts/0                                               Fri Aug 28 21:40:11 -0300 2026
+bin                                                                  **Never logged in**
+alice            pts/1    192.0.2.44                                 Sat Aug 29 09:02:44 -0300 2026
+verylongusername tty2                                                Thu Aug 27 18:11:02 -0300 2026

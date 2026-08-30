@@ -1,5 +1,5 @@
-// Package tuitemplate exists for one reason: to embed the repository's
-// tool.json into the binary.
+// Package tuiusers exists for one reason: to embed the repository's tool.json
+// into the binary.
 //
 // The manifest is the family's single source of truth about a tool. Since it
 // also carries the `backends[]` block — which version of the backend is the
@@ -10,7 +10,7 @@
 //
 // Keep this file when you start a tool from the template: rename the package
 // after your tool and leave everything else as it is.
-package tuitemplate
+package tuiusers
 
 import _ "embed"
 

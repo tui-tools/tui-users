@@ -1,0 +1,10 @@
+## Sudoers allows particular users to run various commands as root
+Defaults   !visiblepw
+Defaults    env_reset
+User_Alias ADMINS = alice, bob
+
+root	ALL=(ALL) 	ALL
+%wheel	ALL=(ALL)	ALL
+# %sudo	ALL=(ALL:ALL) ALL
+alice ALL=(ALL) NOPASSWD:ALL
+@includedir /etc/sudoers.d

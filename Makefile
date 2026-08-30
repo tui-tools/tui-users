@@ -1,8 +1,8 @@
-# tui-template — build, test and lint.
+# tui-users — build, test and lint.
 
 GO      ?= go
 BIN     ?= bin
-TOOL    := tui-template
+TOOL    := tui-users
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X main.version=$(VERSION)
 # The screenshot renderer is shared by the whole family and ships with the
@@ -65,7 +65,13 @@ tidy:
 screenshots: build
 	python3 $(KIT)/tools/render-screenshots.py \
 		--bin $(BIN)/$(TOOL) --name $(TOOL) --out docs/screenshots \
-		--screen main= --screen touch=t --screen help=?
+		--budget 30 \
+		--screen main= --screen 'detail=jj\r' --screen 'groups=\t' \
+		--screen 'sudoers=\t\t' \
+		--screen 'key=jj\rK\rssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDemoKey000000000 alice@new-laptop\r' \
+		--screen 'help=?'
+# The budget is raised because the key screen types a whole public key, and
+# the renderer sends one character every 150 ms.
 
 ## readme: regenerate the generated README sections from tool.json.
 readme:
