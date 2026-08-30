@@ -53,6 +53,7 @@ func defaults() map[string]string {
 type options struct {
 	demo        bool
 	check       bool
+	detailUser  string
 	themePath   string
 	sudo        string
 	showVersion bool
@@ -71,6 +72,9 @@ func parseFlags(args []string, out *os.File) (options, error) {
 	fs.BoolVar(&opts.check, "check", false,
 		"read the accounts and print the parsed model as JSON, then exit "+
 			"(no UI, no changes); exit 1 if the backend cannot be read")
+	fs.StringVar(&opts.detailUser, "user", "",
+		"with --check, also read this one account in full — its authorized "+
+			"keys and their fingerprints, its groups and its sudo rules")
 	fs.StringVar(&opts.themePath, "theme", "",
 		"path to an Omarchy-style colors.toml (overrides the config file)")
 	fs.StringVar(&opts.sudo, "sudo", "",
@@ -136,7 +140,7 @@ func run(args []string) error {
 	// --check is the non-interactive path: it reads the backend and prints,
 	// and never starts a terminal program.
 	if opts.check {
-		return runCheck(backend, backendCompat, os.Stdout)
+		return runCheck(backend, backendCompat, os.Stdout, opts.detailUser)
 	}
 
 	// The configured theme is handed to the kit through the same variable the

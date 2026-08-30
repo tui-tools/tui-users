@@ -239,16 +239,39 @@ if [[ $escalates == yes ]]; then
       "sudo -n chage -E 2030-01-01 $TESTUSER && sudo -n chage -l $TESTUSER" \
       'Account expires.*2030'
 
+    # A real key, generated here on the guest. The invented blob this used to
+    # write was not a valid ed25519 point, and ssh-keygen refuses a file with
+    # one in it outright — so the fingerprint assertion below could never have
+    # passed on any machine, and proved nothing about the tool when it failed.
+    keydir=$(mktemp -d)
+    ssh-keygen -q -t ed25519 -N '' -C smoke@test -f "$keydir/id_ed25519"
+    keyprint=$(ssh-keygen -lf "$keydir/id_ed25519.pub" | awk '{print $2}')
+    # The fingerprint is base64, so `+` in it would be read as a repetition by
+    # grep -E. Escape it before it becomes a pattern.
+    keyprint_re=${keyprint//+/\\+}
+
     check "install and tee write an authorized_keys file" \
       "sudo -n install -d -m 700 -o $TESTUSER -g $TESTUSER /home/$TESTUSER/.ssh &&
-       printf 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIsmoketest0000 smoke@test\n' |
-         sudo -n tee -a /home/$TESTUSER/.ssh/authorized_keys >/dev/null &&
+       sudo -n install -m 600 -o $TESTUSER -g $TESTUSER \
+         '$keydir/id_ed25519.pub' /home/$TESTUSER/.ssh/authorized_keys &&
        sudo -n stat -c '%U %a' /home/$TESTUSER/.ssh" \
       "$TESTUSER 700"
 
-    check "the tool fingerprints the key it wrote" \
-      "sudo -n ssh-keygen -lf /home/$TESTUSER/.ssh/authorized_keys" \
-      'SHA256:'
+    # And now the tool reads it. The file is mode 600 inside a 700 directory
+    # owned by another account, so an unprivileged read gets EACCES and the
+    # tool has to escalate — the same trap /boot cost tui-snapper and the
+    # netplan-rendered .network file cost tui-network. Demanding the exact
+    # fingerprint ssh-keygen computes covers both halves: that the tool got
+    # the file at all, and that it parsed what it got.
+    check "the tool reads the key it cannot see unprivileged" \
+      "$bin --check --user $TESTUSER" \
+      "\"KeysPath\": \"/home/$TESTUSER/.ssh/authorized_keys\""
+
+    check "the tool fingerprints that key as ssh-keygen does" \
+      "$bin --check --user $TESTUSER" \
+      "$keyprint_re"
+
+    rm -rf "$keydir"
 
     check "userdel removes it again" \
       "sudo -n userdel -r $TESTUSER; ! id $TESTUSER 2>/dev/null && echo gone" \

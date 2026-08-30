@@ -178,6 +178,7 @@ shows `chpasswd` and a row of dots.
 tui-users                        # drive the real accounts
 tui-users --demo                 # sample machine, no privileges needed
 tui-users --check                # read the accounts, print JSON, exit
+tui-users --check --user ana     # and read that one account in full
 tui-users --theme ~/mytheme/colors.toml
 tui-users --sudo ""              # run the commands directly (as root)
 tui-users --version
@@ -209,6 +210,27 @@ $ tui-users --check | head -16
   "flagged": [
     {
 ```
+
+The list read stops short of the per-account questions, because each of them is
+another process per user: authorized keys and their fingerprints, the sudo rules
+`sudo -l` reports, aging. `--user <name>` asks them for one account and adds the
+answer under `detail`, which is what opening a row in the UI does. A name that
+is not on the machine is an error rather than an empty `detail`.
+
+```console
+$ tui-users --check --user ana | grep -A 4 '"Keys"'
+  "Keys": [
+    {
+      "Type": "ssh-ed25519",
+      "Comment": "ana@laptop",
+      "Fingerprint": "SHA256:2p0k…",
+```
+
+That path is worth naming separately because it is the one that escalates for a
+file it cannot otherwise see: `~/.ssh/authorized_keys` is mode 600 inside a mode
+700 directory owned by somebody else, so reading another account's keys means
+`sudo -n`, and a tool that quietly returned no keys instead would look identical
+to an account that has none.
 
 A password hash never reaches it. The model carries the *state* of a password —
 usable, locked, empty, never set, unknown — and never the hash, so a `--check`
@@ -350,7 +372,7 @@ hidden; one below the minimum is marked as such and the tool still runs.
 | Binary | `ssh-keygen` |
 | Version read with | `ssh -V` |
 | Minimum | 8.2 |
-| Tested | none yet |
+| Tested | `9.6`, `10.2`, `10.5` |
 | Version-gated features | `security-keys` (since 8.2) |
 
 | Versions | What changes |

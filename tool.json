@@ -143,6 +143,11 @@
           "range": "<6.8",
           "impact": "`ssh-keygen -l` prints MD5 fingerprints rather than SHA256, so the fingerprint column will not match what a modern `ssh-keygen -lf` shows elsewhere"
         }
+      ],
+      "tested": [
+        "9.6",
+        "10.2",
+        "10.5"
       ]
     }
   ],

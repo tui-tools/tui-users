@@ -85,7 +85,7 @@ func TestCheckReportsTheModel(t *testing.T) {
 		t.Fatalf("pickBackend: %v", err)
 	}
 	var out bytes.Buffer
-	if err := runCheck(backend, compat.Result{}, &out); err != nil {
+	if err := runCheck(backend, compat.Result{}, &out, ""); err != nil {
 		t.Fatalf("runCheck: %v", err)
 	}
 	for _, want := range []string{
@@ -120,10 +120,69 @@ func TestCheckOnAMachineWithoutShadowStillReports(t *testing.T) {
 		t.Fatalf("pickBackend: %v", err)
 	}
 	var out bytes.Buffer
-	if err := runCheck(backend, compat.Result{}, &out); err != nil {
+	if err := runCheck(backend, compat.Result{}, &out, ""); err != nil {
 		t.Fatalf("runCheck: %v", err)
 	}
 	if !strings.Contains(out.String(), `"flagged": [`) {
 		t.Error("flagged must be a list, so a script can iterate it")
+	}
+}
+
+// TestCheckWithUserAddsTheDetailRead covers `--check --user`, the flag the
+// smoke test uses to reach the per-account reads: authorized keys and their
+// fingerprints, the supplementary groups and the sudo rules. None of them is
+// in the list read, so without this flag nothing outside the UI ever runs
+// them.
+func TestCheckWithUserAddsTheDetailRead(t *testing.T) {
+	backend, err := pickBackend(baseConfig(), options{demo: true}, compat.Result{})
+	if err != nil {
+		t.Fatalf("pickBackend: %v", err)
+	}
+	var out bytes.Buffer
+	if err := runCheck(backend, compat.Result{}, &out, "alice"); err != nil {
+		t.Fatalf("runCheck: %v", err)
+	}
+	for _, want := range []string{
+		`"detail": {`,
+		`"KeysPath": "/home/alice/.ssh/authorized_keys"`,
+		`"Fingerprint": "SHA256:`,
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("--check --user alice is missing %s", want)
+		}
+	}
+}
+
+// TestCheckWithAnUnknownUserFails: a test that asks for an account and gets a
+// silent empty detail back would pass on a machine where the read is broken,
+// so the name not being there is an error.
+func TestCheckWithAnUnknownUserFails(t *testing.T) {
+	backend, err := pickBackend(baseConfig(), options{demo: true}, compat.Result{})
+	if err != nil {
+		t.Fatalf("pickBackend: %v", err)
+	}
+	var out bytes.Buffer
+	err = runCheck(backend, compat.Result{}, &out, "nobody-here")
+	if err == nil {
+		t.Fatal("runCheck accepted an account that does not exist")
+	}
+	if !strings.Contains(err.Error(), "nobody-here") {
+		t.Errorf("error = %q, want it to name the account", err)
+	}
+}
+
+// TestCheckWithoutUserOmitsTheDetail keeps the default report the shape every
+// existing caller parses.
+func TestCheckWithoutUserOmitsTheDetail(t *testing.T) {
+	backend, err := pickBackend(baseConfig(), options{demo: true}, compat.Result{})
+	if err != nil {
+		t.Fatalf("pickBackend: %v", err)
+	}
+	var out bytes.Buffer
+	if err := runCheck(backend, compat.Result{}, &out, ""); err != nil {
+		t.Fatalf("runCheck: %v", err)
+	}
+	if strings.Contains(out.String(), `"detail"`) {
+		t.Error("a plain --check must not carry a detail block")
 	}
 }

@@ -64,6 +64,12 @@ type checkReport struct {
 	// than asserted: an untested version is a fact about the machine, not a
 	// failure of the read path.
 	Compat compat.Result `json:"compat"`
+	// Detail is one account read in full, present only when --user named one.
+	// The list read deliberately does not fetch authorized keys, sudo rules or
+	// aging for every account on the machine — that is one ssh-keygen and one
+	// `sudo -l` per user — so this is the only way to exercise those reads
+	// without opening the UI.
+	Detail *accounts.User `json:"detail,omitempty"`
 	// Model is the parsed state in full.
 	Model accounts.Model `json:"model"`
 }
@@ -77,8 +83,13 @@ type checkReport struct {
 // groups, shells and last logins are still read, and the report says the
 // password state is unknown. That is the read path working, and it is what the
 // smoke test asserts there.
+//
+// detailUser, when not empty, names one account to additionally read in full
+// through the backend's detail path. An account that does not exist is an
+// error, because a test that asked for a name and silently got nothing back
+// would pass on a machine where the read is broken.
 func runCheck(backend accounts.Backend, backendCompat compat.Result,
-	out io.Writer) error {
+	out io.Writer, detailUser string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), checkTimeout)
 	defer cancel()
 
@@ -124,7 +135,32 @@ func runCheck(backend accounts.Backend, backendCompat compat.Result,
 		}
 	}
 
+	if detailUser != "" {
+		detail, err := detailFor(ctx, backend, model, detailUser)
+		if err != nil {
+			return err
+		}
+		report.Detail = &detail
+	}
+
 	encoder := json.NewEncoder(out)
 	encoder.SetIndent("", "  ")
 	return encoder.Encode(report)
+}
+
+// detailFor runs the backend's detail read over one named account.
+func detailFor(ctx context.Context, backend accounts.Backend,
+	model accounts.Model, name string) (accounts.User, error) {
+	for _, user := range model.Users {
+		if user.Name != name {
+			continue
+		}
+		detail, err := backend.LoadUser(ctx, user)
+		if err != nil {
+			return accounts.User{}, fmt.Errorf("reading %s: %w", name, err)
+		}
+		return detail, nil
+	}
+	return accounts.User{}, fmt.Errorf("no account named %q on this machine",
+		name)
 }
