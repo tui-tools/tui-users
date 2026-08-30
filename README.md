@@ -248,6 +248,7 @@ tui-users                        # drive the real accounts
 tui-users --demo                 # sample machine, no privileges needed
 tui-users --check                # read the accounts, print JSON, exit
 tui-users --check --user ana     # and read that one account in full
+tui-users --report               # print what a bug report needs, exit
 tui-users --theme ~/mytheme/colors.toml
 tui-users --sudo ""              # run the commands directly (as root)
 tui-users --version
@@ -308,6 +309,46 @@ report is safe to paste into a bug.
 [tui-lab](https://github.com/tui-tools/tui-lab) uses it to test this tool
 against real machines on Ubuntu, Fedora and Omarchy Server; the assertions live
 in [`test/smoke.sh`](test/smoke.sh).
+
+### `--report`, for bug reports
+
+`--report` prints, in one block, everything a maintainer has to ask for
+otherwise: the tool and kit versions, the account backend, the openssh version
+the same probe the header uses read off the machine, the distribution, the
+kernel, the terminal, the theme, the escalation prefix, and whether the running
+binary came from a package. It needs no privileges and reads no account, so it
+works on the machine where the bug is — including one where the backend cannot
+be built at all, which is itself a thing worth reporting.
+
+```console
+$ tui-users --report
+tui-users 0.1.2 (kit v0.2.9)
+backend: shadow-utils (version unknown: no shadow-utils program prints one)
+mode: live
+distro: fedora 42 (Fedora Linux 42 (Workstation Edition))
+kernel: 6.19.14-108.fc42.x86_64
+arch: x86_64
+locale: en_US.UTF-8
+term: xterm-256color
+theme: tokyo-night
+sudo: sudo -n
+root: no
+binary: /usr/bin/tui-users (packaged)
+openssh: 9.9
+```
+
+The backend line carries no number because there is none to carry: no program
+in shadow-utils prints a version. `openssh` does, and it is on its own line
+because the key views are gated on it.
+
+The block is written to be published as it is: it carries no hostname, user
+name, home path or address, no account name, and no environment variable beyond
+`LANG`, `LC_ALL`, `TERM` and `TERM_PROGRAM`. A binary living under your home
+directory is reported as being there without naming the path. `--report` works
+with `--demo` too, where it says so on the `mode` line.
+
+The bug form asks for this block first — see
+[`.github/ISSUE_TEMPLATE/bug_report.yml`](.github/ISSUE_TEMPLATE/bug_report.yml).
 
 Most reads need no privileges at all — `getent passwd`, `getent group`,
 `lastlog` and `loginctl` answer to any user, and `tui-users` never escalates for

@@ -201,6 +201,34 @@ else
   fail=$((fail + 1))
 fi
 
+# --- the report block ------------------------------------------------------
+#
+# --report is read-only and unprivileged, so it is smoked without sudo: a user
+# who cannot escalate is exactly the one who most needs to be able to file a
+# usable bug. What is asserted is that it agrees with the backend this machine
+# is actually driving, that it still answers under --demo, and that it keeps
+# its privacy promise — the block goes into a public issue, so a home path or
+# the host name appearing in it is a bug, not a cosmetic detail.
+check "report names the account backend" \
+  "$bin --report" \
+  '^backend: shadow-utils'
+
+check "report says the run was live" \
+  "$bin --report" \
+  '^mode: live$'
+
+check "report works in demo mode too" \
+  "$bin --demo --report" \
+  '^backend: demo$'
+
+check "and says so on the mode line" \
+  "$bin --demo --report" \
+  '^mode: demo'
+
+check "report leaks neither a home path nor the host name" \
+  "$bin --report | grep -cE '/home/|$(uname -n)' || true" \
+  '^0$'
+
 # --- the write path ---------------------------------------------------------
 #
 # Only when escalation works without a password, and only against an account
