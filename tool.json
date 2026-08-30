@@ -154,7 +154,7 @@
   "install": {
     "repo_url": "https://pkgs.tui.tools",
     "pacman": {
-      "available": false,
+      "available": true,
       "package": "tui-users",
       "repo": "tui-tools",
       "requires_repo_setup": true,
@@ -171,7 +171,7 @@
       "note": "The -bin package installs the released static binary."
     },
     "apt": {
-      "available": false,
+      "available": true,
       "package": "tui-users",
       "repo": "tui-tools",
       "requires_repo_setup": true,
@@ -180,7 +180,7 @@
       "note": "Upgrades then arrive with the rest of your system updates."
     },
     "dnf": {
-      "available": false,
+      "available": true,
       "package": "tui-users",
       "repo": "tui-tools",
       "requires_repo_setup": true,
