@@ -2,9 +2,9 @@
 
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/tui-tools/tui-users/badge)](https://scorecard.dev/viewer/?uri=github.com/tui-tools/tui-users)
 
-> **Beta.** Beta: the family is days old and still changing. Package names,
-> flags and keys may move without notice until 1.0. Pin versions, and report
-> what breaks.
+> **Beta.** The family is days old and still changing. Package names, flags
+> and keys may move without notice until 1.0. Pin versions, and report what
+> breaks.
 
 A terminal UI for the machine's local accounts. It shows who exists, what each
 account can do, which keys let them in and what sudo grants them — and
