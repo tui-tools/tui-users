@@ -30,11 +30,9 @@ tags = ["privacy", "path"]
 regexTarget = "secret"
 regexes = [
   '''^(user|username|you|me|example|root|runner|ubuntu|debian|fedora|arch|vagrant|linuxbrew|Shared)$''',
-  # This tool's subject is the account database, so its fixtures and its demo
-  # are populated with accounts. They use the two names documentation has used
-  # for stand-in people since long before this repository existed, and every
-  # /home path here is one of theirs — invented, not captured.
-  '''^(alice|bob)$''',
+  # The stand-in people of the family's demos, fixtures and screenshots, and
+  # the placeholder every manual page reaches for. Invented, not captured.
+  '''^(ana|alice|bob|johndoe)$''',
 ]
 
 # Build output. CI scans a fresh checkout, where none of this exists, but a
