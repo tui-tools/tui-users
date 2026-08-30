@@ -2,6 +2,10 @@
 
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/tui-tools/tui-users/badge)](https://scorecard.dev/viewer/?uri=github.com/tui-tools/tui-users)
 
+> **Beta.** Beta: the family is days old and still changing. Package names,
+> flags and keys may move without notice until 1.0. Pin versions, and report
+> what breaks.
+
 A terminal UI for the machine's local accounts. It shows who exists, what each
 account can do, which keys let them in and what sudo grants them — and
 **previews the exact command line of every change before running it**.
@@ -123,7 +127,7 @@ Upgrades then arrive with the rest of your system updates.
 ### Any distribution, static binary
 
 ```sh
-curl -fsSL https://github.com/tui-tools/tui-users/releases/download/v0.1.1/tui-users_0.1.1_linux_amd64.tar.gz | tar -xz tui-users
+curl -fsSL https://github.com/tui-tools/tui-users/releases/download/v0.1.2/tui-users_0.1.2_linux_amd64.tar.gz | tar -xz tui-users
 sudo install -m0755 tui-users /usr/local/bin/tui-users
 ```
 
@@ -556,6 +560,14 @@ widgets, the config loader and the command runner shared by the whole family.
   was read.
 - `tui-users` re-reads the accounts after every change, so what you see is what
   the system reports, not what the tool assumed.
+
+## Contributing
+
+Contributions arrive as pull requests, and the guide the whole family follows
+is [CONTRIBUTING.md](https://github.com/tui-tools/tui-kit/blob/main/CONTRIBUTING.md)
+in tui-kit. A vulnerability goes to
+[SECURITY.md](https://github.com/tui-tools/tui-kit/blob/main/SECURITY.md)
+instead, never into a public issue.
 
 ## License
 

@@ -22,7 +22,9 @@ func ParsePasswd(out string) []accounts.User {
 	var users []accounts.User
 	for _, line := range strings.Split(out, "\n") {
 		fields := strings.Split(strings.TrimRight(line, "\r"), ":")
-		if len(fields) < 7 || fields[0] == "" {
+		// A blank name is not an account: nothing can be shown for it and
+		// nothing can be done to it.
+		if len(fields) < 7 || strings.TrimSpace(fields[0]) == "" {
 			continue
 		}
 		uid, err := strconv.Atoi(fields[2])
@@ -51,7 +53,7 @@ func ParseGroup(out string) []accounts.Group {
 	var groups []accounts.Group
 	for _, line := range strings.Split(out, "\n") {
 		fields := strings.Split(strings.TrimRight(line, "\r"), ":")
-		if len(fields) < 4 || fields[0] == "" {
+		if len(fields) < 4 || strings.TrimSpace(fields[0]) == "" {
 			continue
 		}
 		gid, err := strconv.Atoi(fields[2])
@@ -93,7 +95,9 @@ func ParseShadow(out string) map[string]ShadowEntry {
 	entries := map[string]ShadowEntry{}
 	for _, line := range strings.Split(out, "\n") {
 		fields := strings.Split(strings.TrimRight(line, "\r"), ":")
-		if len(fields) < 9 || fields[0] == "" {
+		// Keyed by the account name, so a blank one would be a password
+		// state attached to nobody.
+		if len(fields) < 9 || strings.TrimSpace(fields[0]) == "" {
 			continue
 		}
 		entry := ShadowEntry{State: passwordState(fields[1])}
