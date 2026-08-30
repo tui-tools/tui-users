@@ -1,5 +1,7 @@
 <img src="assets/logo.png" alt="tui-users" width="240">
 
+[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/tui-tools/tui-users/badge)](https://scorecard.dev/viewer/?uri=github.com/tui-tools/tui-users)
+
 A terminal UI for the machine's local accounts. It shows who exists, what each
 account can do, which keys let them in and what sudo grants them — and
 **previews the exact command line of every change before running it**.
