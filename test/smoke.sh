@@ -225,8 +225,12 @@ check "and says so on the mode line" \
   "$bin --demo --report" \
   '^mode: demo'
 
+# The distro and kernel lines are quoted from the machine's own description of
+# itself, and a host named after its distribution ("fedora" on Fedora) would
+# match there without anything having leaked. They are dropped before the
+# search, so this stays a test of the tool rather than of the guest's hostname.
 check "report leaks neither a home path nor the host name" \
-  "$bin --report | grep -cE '/home/|$(uname -n)' || true" \
+  "$bin --report | grep -vE '^(distro|kernel): ' | grep -cE '/home/|$(uname -n)' || true" \
   '^0$'
 
 # --- the write path ---------------------------------------------------------
