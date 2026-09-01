@@ -488,6 +488,10 @@ func TestRendersAtEveryWidth(t *testing.T) {
 				a.mode = modeForm
 				a.form = newExpiryForm(a.visibleUsers[0])
 			},
+			"new group": func() {
+				a.mode = modeForm
+				a.form = newGroupForm()
+			},
 		}
 		for name, setup := range screens {
 			setup()
@@ -623,6 +627,248 @@ func TestKeyActionNeedsTheDetailRead(t *testing.T) {
 	}
 }
 
+// openGroups moves to the groups screen and puts the cursor on one group.
+func openGroups(t *testing.T, a *app, name string) {
+	t.Helper()
+	a.mode, a.previous = modeGroups, modeGroups
+	for i, group := range a.visibleGroups {
+		if group.Name == name {
+			a.groups.cursor = i
+			return
+		}
+	}
+	t.Fatalf("no group named %q on the sample machine", name)
+}
+
+// TestGroupFormBuildsGroupadd walks the new-group form the way a user does,
+// and checks the sample machine really gained the group.
+func TestGroupFormBuildsGroupadd(t *testing.T) {
+	a, backend := newTestApp(t)
+	drain(t, a, press(a, "tab"))
+	if a.mode != modeGroups {
+		t.Fatalf("tab did not open the groups screen")
+	}
+	drain(t, a, press(a, "n"))
+	if a.mode != modeForm {
+		t.Fatalf("n did not open the group form (status: %s)", a.status)
+	}
+	a.form.fields[0].input.SetValue("developers")
+	a.form.fields[1].input.SetValue("1500")
+	drain(t, a, press(a, "enter"))
+
+	if a.mode != modeConfirm {
+		t.Fatalf("the form did not open a confirm dialog (status: %s)", a.status)
+	}
+	want := "sudo -n groupadd -g 1500 developers"
+	if a.confirm.Command != want {
+		t.Errorf("previewed %q, want %q", a.confirm.Command, want)
+	}
+
+	drain(t, a, press(a, "y"))
+	if got := backend.Preview(backend.Ran()[0]); got != want {
+		t.Errorf("ran %q, want the previewed %q", got, want)
+	}
+	group, ok := a.model.Group("developers")
+	if !ok {
+		t.Fatal("the sample machine did not gain the group")
+	}
+	if group.GID != 1500 {
+		t.Errorf("gid = %d, want the one that was asked for", group.GID)
+	}
+}
+
+// TestGroupFormRefusesAName covers the validation that stands between a typo
+// and an argv run as root: the refusal reaches the status line, not groupadd.
+func TestGroupFormRefusesAName(t *testing.T) {
+	a, backend := newTestApp(t)
+	drain(t, a, press(a, "tab"))
+	drain(t, a, press(a, "n"))
+	a.form.fields[0].input.SetValue("Dev Team")
+	drain(t, a, press(a, "enter"))
+
+	if a.mode == modeConfirm {
+		t.Error("a confirm dialog opened for a name groupadd would not take")
+	}
+	if !strings.Contains(a.status, "not a valid group name") {
+		t.Errorf("status = %q", a.status)
+	}
+	if len(backend.Ran()) != 0 {
+		t.Error("a command ran")
+	}
+}
+
+// TestDeletingAGroupNeedsItEmpty: every human group on the sample machine is
+// somebody's primary group, which is the case people expect to work and
+// groupdel refuses.
+func TestDeletingAGroupNeedsItEmpty(t *testing.T) {
+	a, backend := newTestApp(t)
+	openGroups(t, a, "wheel")
+	drain(t, a, press(a, "D"))
+
+	if a.mode == modeConfirm || a.mode == modeInput {
+		t.Fatal("a dialog opened for a group that still has members")
+	}
+	if !strings.Contains(a.status, "member") {
+		t.Errorf("status = %q, want the reason", a.status)
+	}
+	if len(backend.Ran()) != 0 {
+		t.Error("a command ran against a group with members")
+	}
+}
+
+// TestDeletingASystemGroupAsksForItsName is the extra answer a package's group
+// costs: the name, typed back, before the confirm dialog is even offered.
+func TestDeletingASystemGroupAsksForItsName(t *testing.T) {
+	a, backend := newTestApp(t)
+	// Every system group of the sample machine has a member, so the test makes
+	// an empty one: gid 500 is below the machine's human range.
+	drain(t, a, press(a, "tab"))
+	drain(t, a, press(a, "n"))
+	a.form.fields[0].input.SetValue("legacy")
+	a.form.fields[1].input.SetValue("500")
+	drain(t, a, press(a, "enter"))
+	drain(t, a, press(a, "y"))
+	if group, ok := a.model.Group("legacy"); !ok || !group.System {
+		t.Fatalf("the sample machine did not gain an empty system group: %+v",
+			group)
+	}
+	// Everything from here is judged against the groupadd already recorded.
+	ranBefore := len(backend.Ran())
+
+	openGroups(t, a, "legacy")
+	drain(t, a, press(a, "D"))
+	if a.mode != modeInput {
+		t.Fatalf("D did not ask for the name (status: %s)", a.status)
+	}
+
+	// The wrong name deletes nothing.
+	a.input.Model.SetValue("wheel")
+	drain(t, a, press(a, "enter"))
+	if a.mode == modeConfirm {
+		t.Fatal("a confirm dialog opened for a name that did not match")
+	}
+	if len(backend.Ran()) != ranBefore {
+		t.Fatal("a command ran after a mistyped confirmation")
+	}
+
+	drain(t, a, press(a, "D"))
+	a.input.Model.SetValue("legacy")
+	drain(t, a, press(a, "enter"))
+	if a.mode != modeConfirm {
+		t.Fatalf("the typed name did not open the dialog (status: %s)", a.status)
+	}
+	want := "sudo -n groupdel legacy"
+	if a.confirm.Command != want {
+		t.Errorf("previewed %q, want %q", a.confirm.Command, want)
+	}
+	if !a.confirm.Danger {
+		t.Error("deleting a group is a danger dialog")
+	}
+	if !strings.Contains(a.confirm.Body, "system group") {
+		t.Errorf("the dialog does not say what kind of group this is: %q",
+			a.confirm.Body)
+	}
+
+	drain(t, a, press(a, "y"))
+	if got := backend.Preview(backend.Ran()[ranBefore]); got != want {
+		t.Errorf("ran %q, want the previewed %q", got, want)
+	}
+	if _, ok := a.model.Group("legacy"); ok {
+		t.Error("the sample machine still has the group")
+	}
+}
+
+// TestSudoUsesTheMachinesOwnGroup covers both directions of the sudo key, and
+// the fact the dialog has to carry: which group grants it here.
+func TestSudoUsesTheMachinesOwnGroup(t *testing.T) {
+	a, backend := newTestApp(t)
+	// bob holds no sudo on the sample machine, so S grants it.
+	selectUser(t, a, "bob")
+	drain(t, a, press(a, "S"))
+	if a.mode != modeConfirm {
+		t.Fatalf("S did not open a confirm dialog (status: %s)", a.status)
+	}
+	want := "sudo -n gpasswd -a bob wheel"
+	if a.confirm.Command != want {
+		t.Errorf("previewed %q, want %q", a.confirm.Command, want)
+	}
+	if !strings.Contains(a.confirm.Body, "wheel") {
+		t.Errorf("the dialog does not name the group: %q", a.confirm.Body)
+	}
+	drain(t, a, press(a, "y"))
+	if got := backend.Preview(backend.Ran()[0]); got != want {
+		t.Errorf("ran %q, want the previewed %q", got, want)
+	}
+
+	// alice holds it, so the same key takes it away.
+	a, backend = newTestApp(t)
+	selectUser(t, a, "alice")
+	drain(t, a, press(a, "S"))
+	want = "sudo -n gpasswd -d alice wheel"
+	if a.confirm.Command != want {
+		t.Fatalf("previewed %q, want %q", a.confirm.Command, want)
+	}
+	drain(t, a, press(a, "y"))
+	if got := backend.Preview(backend.Ran()[0]); got != want {
+		t.Errorf("ran %q, want the previewed %q", got, want)
+	}
+	if user, _ := a.model.User("alice"); user.Sudo.Granted() {
+		t.Error("alice still holds sudo on the sample machine")
+	}
+}
+
+// TestSudoRefusesTheLastAdministrator is the refusal that matters most: the
+// command would work, and it would leave nobody able to run it again.
+func TestSudoRefusesTheLastAdministrator(t *testing.T) {
+	a, backend := newTestApp(t)
+	// carol is the second member of wheel; take her out first.
+	selectUser(t, a, "carol")
+	drain(t, a, press(a, "S"))
+	drain(t, a, press(a, "y"))
+	if len(backend.Ran()) != 1 {
+		t.Fatalf("ran %v", backend.Ran())
+	}
+
+	selectUser(t, a, "alice")
+	drain(t, a, press(a, "S"))
+	if a.mode == modeConfirm {
+		t.Fatal("a dialog opened for the last account holding sudo")
+	}
+	if !strings.Contains(a.status, "only member") {
+		t.Errorf("status = %q, want the reason", a.status)
+	}
+	if len(backend.Ran()) != 1 {
+		t.Error("a command ran against the last administrator")
+	}
+}
+
+// TestSudoRefusesAMachineWithNoSudoGroup: without wheel, sudo or admin there is
+// nothing to add somebody to, and guessing one would be inventing a privilege
+// path this tool does not own.
+func TestSudoRefusesAMachineWithNoSudoGroup(t *testing.T) {
+	a, backend := newTestApp(t)
+	var kept []accounts.Group
+	for _, group := range a.model.Groups {
+		if group.Name != "wheel" {
+			kept = append(kept, group)
+		}
+	}
+	a.model.Groups = kept
+	a.applyFilter()
+
+	selectUser(t, a, "bob")
+	drain(t, a, press(a, "S"))
+	if a.mode == modeConfirm {
+		t.Fatal("a dialog opened on a machine with no sudo group")
+	}
+	if !strings.Contains(a.status, "no sudo-granting group") {
+		t.Errorf("status = %q", a.status)
+	}
+	if len(backend.Ran()) != 0 {
+		t.Error("a command ran")
+	}
+}
+
 func TestHelpListsEveryActionKey(t *testing.T) {
 	// The help screen and the hint bar are built from the same table, and a
 	// key that is not in it is a key nobody will find.
@@ -632,7 +878,8 @@ func TestHelpListsEveryActionKey(t *testing.T) {
 			keys[strings.TrimSpace(key)] = true
 		}
 	}
-	for _, want := range []string{"n", "D", "l", "p", "a", "s", "e", "K", "q"} {
+	for _, want := range []string{"n", "D", "l", "p", "a", "s", "e", "K", "S",
+		"q"} {
 		if !keys[want] {
 			t.Errorf("the help screen does not mention %q", want)
 		}

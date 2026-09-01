@@ -37,15 +37,17 @@ var sudoGroups = []string{"wheel", "sudo", "admin"}
 // capabilities describes what the shadow-utils backend supports. It is shared
 // by the real and the fake backend, so --demo behaves exactly like a real run.
 var capabilities = accounts.Capabilities{
-	SudoGroups:       sudoGroups,
-	SupportsCreate:   true,
-	SupportsDelete:   true,
-	SupportsLock:     true,
-	SupportsPassword: true,
-	SupportsGroups:   true,
-	SupportsShell:    true,
-	SupportsExpiry:   true,
-	SupportsKeys:     true,
+	SudoGroups:          sudoGroups,
+	SupportsCreate:      true,
+	SupportsDelete:      true,
+	SupportsLock:        true,
+	SupportsPassword:    true,
+	SupportsGroups:      true,
+	SupportsShell:       true,
+	SupportsExpiry:      true,
+	SupportsKeys:        true,
+	SupportsGroupCreate: true,
+	SupportsGroupDelete: true,
 }
 
 // Capabilities reports what the shadow-utils backend supports, with the shell
@@ -235,6 +237,93 @@ func BuildGroupMembership(add bool, user, group string) (accounts.Command, error
 		Description: description,
 		// Adding somebody to wheel is a privilege change, and removing them
 		// from it can lock the only administrator out of their own machine.
+		Destructive: true,
+	}, nil
+}
+
+// BuildSudo grants or revokes sudo by editing the membership of the group that
+// grants it on this machine — wheel on Arch, Fedora and RHEL, sudo on Debian
+// and Ubuntu. The group is the caller's, read off the machine rather than
+// guessed here.
+//
+// It is BuildGroupMembership with a description that says what the change
+// means, because "add alice to wheel" and "grant alice sudo" are the same
+// command and only one of them is the sentence somebody meant.
+func BuildSudo(grant bool, user, group string) (accounts.Command, error) {
+	cmd, err := BuildGroupMembership(grant, user, group)
+	if err != nil {
+		return accounts.Command{}, err
+	}
+	cmd.Description = "Revoke sudo from " + user +
+		" by removing them from the group " + group
+	if grant {
+		cmd.Description = "Grant sudo to " + user +
+			" by adding them to the group " + group
+	}
+	return cmd, nil
+}
+
+// maxGID is the highest GID this tool will ask groupadd for. It is the GID_MAX
+// shadow-utils ships in /etc/login.defs: a number above it is a typo far more
+// often than it is a decision, and groupadd is not the place to find that out.
+const maxGID = 60000
+
+// BuildCreateGroup turns the new-group form into a groupadd command.
+//
+// The GID is optional, and empty is the normal answer: groupadd then picks the
+// next free number out of the machine's own range. A GID that was typed is
+// validated here, because it reaches an argv run as root.
+func BuildCreateGroup(spec accounts.NewGroup) (accounts.Command, error) {
+	if err := checkName("group", spec.Name); err != nil {
+		return accounts.Command{}, err
+	}
+	argv := []string{"groupadd"}
+	description := "Create the group " + spec.Name
+	if value := strings.TrimSpace(spec.GID); value != "" {
+		gid, err := strconv.Atoi(value)
+		if err != nil || gid < 0 || gid > maxGID {
+			return accounts.Command{}, fmt.Errorf(
+				"shadow: the GID must be a number between 0 and %d", maxGID)
+		}
+		// Atoi's own rendering, so "007" reaches groupadd as 7.
+		argv = append(argv, "-g", strconv.Itoa(gid))
+		description += " with gid " + strconv.Itoa(gid)
+	}
+	argv = append(argv, spec.Name)
+	return accounts.Command{Argv: argv, Description: description}, nil
+}
+
+// BuildDeleteGroup removes a group.
+//
+// A group with members is refused rather than emptied: groupdel refuses a
+// primary one anyway, and dropping a supplementary group from every account
+// that held it is exactly the change nobody meant to make by pressing one key.
+//
+// A system group — one outside the machine's own GID range, which is what
+// Group.System reports — is refused unless allowSystem says the extra
+// confirmation was given. A package created it and expects it to be there.
+func BuildDeleteGroup(group accounts.Group, allowSystem bool) (accounts.Command, error) {
+	if err := checkName("group", group.Name); err != nil {
+		return accounts.Command{}, err
+	}
+	if len(group.Primary) > 0 {
+		return accounts.Command{}, fmt.Errorf(
+			"shadow: %s is the primary group of %s, and groupdel refuses that",
+			group.Name, strings.Join(group.Primary, ", "))
+	}
+	if members := group.All(); len(members) > 0 {
+		return accounts.Command{}, fmt.Errorf(
+			"shadow: the group %s still has %d member(s) — %s — so it is not empty",
+			group.Name, len(members), strings.Join(members, ", "))
+	}
+	if group.System && !allowSystem {
+		return accounts.Command{}, fmt.Errorf(
+			"shadow: %s is a system group (gid %d), which a package owns",
+			group.Name, group.GID)
+	}
+	return accounts.Command{
+		Argv:        []string{"groupdel", group.Name},
+		Description: "Delete the group " + group.Name,
 		Destructive: true,
 	}, nil
 }

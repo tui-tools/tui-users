@@ -644,7 +644,9 @@ func (a *app) shortHelpKeys() []ui.KeyHint {
 		hints = append(hints, ui.KeyHint{Key: "p", Desc: "password"})
 	}
 	if a.caps.SupportsGroups {
-		hints = append(hints, ui.KeyHint{Key: "a", Desc: "add to group"})
+		hints = append(hints,
+			ui.KeyHint{Key: "a", Desc: "add to group"},
+			ui.KeyHint{Key: "S", Desc: "sudo"})
 	}
 	return append(hints,
 		ui.KeyHint{Key: "tab", Desc: "groups"},
@@ -665,7 +667,8 @@ func (a *app) detailHelpKeys() []ui.KeyHint {
 	if a.caps.SupportsGroups {
 		hints = append(hints,
 			ui.KeyHint{Key: "a", Desc: "add to group"},
-			ui.KeyHint{Key: "x", Desc: "remove"})
+			ui.KeyHint{Key: "x", Desc: "remove"},
+			ui.KeyHint{Key: "S", Desc: "sudo"})
 	}
 	if a.caps.SupportsShell {
 		hints = append(hints, ui.KeyHint{Key: "s", Desc: "shell"})
@@ -683,23 +686,36 @@ func (a *app) detailHelpKeys() []ui.KeyHint {
 
 // groupsHelpKeys is the hint bar of the groups screen.
 func (a *app) groupsHelpKeys() []ui.KeyHint {
-	return []ui.KeyHint{
-		{Key: "enter", Desc: "members"},
-		{Key: "tab", Desc: "sudoers"},
-		{Key: "/", Desc: "filter"},
-		{Key: "R", Desc: "reload"},
-		{Key: "?", Desc: "help"},
-		{Key: "q", Desc: "quit"},
-	}
+	hints := []ui.KeyHint{{Key: "enter", Desc: "members"}}
+	hints = append(hints, a.groupActionHints()...)
+	return append(hints,
+		ui.KeyHint{Key: "tab", Desc: "sudoers"},
+		ui.KeyHint{Key: "/", Desc: "filter"},
+		ui.KeyHint{Key: "R", Desc: "reload"},
+		ui.KeyHint{Key: "?", Desc: "help"},
+		ui.KeyHint{Key: "q", Desc: "quit"})
 }
 
 // groupDetailHelpKeys is the hint bar of one group's members.
 func (a *app) groupDetailHelpKeys() []ui.KeyHint {
-	return []ui.KeyHint{
-		{Key: "↑/↓", Desc: "scroll"},
-		{Key: "esc", Desc: "back"},
-		{Key: "?", Desc: "help"},
+	hints := []ui.KeyHint{{Key: "↑/↓", Desc: "scroll"}}
+	hints = append(hints, a.groupActionHints()...)
+	return append(hints,
+		ui.KeyHint{Key: "esc", Desc: "back"},
+		ui.KeyHint{Key: "?", Desc: "help"})
+}
+
+// groupActionHints are the two group actions, offered only where the machine
+// has the program behind them.
+func (a *app) groupActionHints() []ui.KeyHint {
+	var hints []ui.KeyHint
+	if a.caps.SupportsGroupCreate {
+		hints = append(hints, ui.KeyHint{Key: "n", Desc: "new group"})
 	}
+	if a.caps.SupportsGroupDelete {
+		hints = append(hints, ui.KeyHint{Key: "D", Desc: "delete group"})
+	}
+	return hints
 }
 
 // sudoersHelpKeys is the hint bar of the sudoers screen.
@@ -723,11 +739,14 @@ func helpKeys() []ui.KeyHint {
 		{Key: "enter", Desc: "open the selected account or group"},
 		{Key: "esc", Desc: "leave the detail screen"},
 		{Key: "/", Desc: "filter the current screen (esc clears)"},
-		{Key: "n", Desc: "create an account"},
-		{Key: "D", Desc: "delete the account, with or without its home"},
+		{Key: "n", Desc: "create an account, or a group on the groups screen"},
+		{Key: "D", Desc: "delete the account, with or without its home; " +
+			"or an empty group"},
 		{Key: "l", Desc: "lock or unlock the account's password"},
 		{Key: "p", Desc: "set a password (never echoed, never in an argv)"},
 		{Key: "a / x", Desc: "add to a group / remove from one"},
+		{Key: "S", Desc: "grant or revoke sudo, through this machine's own " +
+			"sudo group"},
 		{Key: "s", Desc: "change the login shell"},
 		{Key: "e", Desc: "set the account expiry and password lifetime"},
 		{Key: "K", Desc: "add an authorized key, or remove one of them"},
@@ -737,6 +756,9 @@ func helpKeys() []ui.KeyHint {
 		{Key: "", Desc: ""},
 		{Key: "note", Desc: "every change is previewed and confirmed first"},
 		{Key: "note", Desc: "the keys of an account are read when you open it"},
+		{Key: "note", Desc: "a group is deleted only when it is empty; " +
+			"a system group asks for its name to be typed back"},
+		{Key: "note", Desc: "the last account holding sudo cannot lose it here"},
 		{Key: "note", Desc: "sudo rules are read-only: edit them with visudo"},
 	}
 }

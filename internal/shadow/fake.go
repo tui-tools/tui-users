@@ -307,6 +307,10 @@ func (f *Fake) apply(cmd accounts.Command) (string, error) {
 		return f.setPassword(cmd.Stdin)
 	case "gpasswd":
 		return f.groupMembership(argv)
+	case "groupadd":
+		return f.addGroup(argv)
+	case "groupdel":
+		return f.deleteGroup(argv)
 	case "chage":
 		return f.setAging(argv)
 	case "install":
@@ -479,6 +483,76 @@ func (f *Fake) groupMembership(argv []string) (string, error) {
 	return "Removing user " + name + " from group " + group, nil
 }
 
+// nextGID is the GID groupadd would pick: the first free one in the machine's
+// human range.
+func (f *Fake) nextGID() int {
+	next := f.model.Limits.GIDMin
+	used := map[int]bool{}
+	for _, group := range f.model.Groups {
+		used[group.GID] = true
+	}
+	for used[next] {
+		next++
+	}
+	return next
+}
+
+// addGroup applies a groupadd.
+func (f *Fake) addGroup(argv []string) (string, error) {
+	name := argv[len(argv)-1]
+	gid := -1
+	for i := 1; i < len(argv)-1; i++ {
+		if argv[i] == "-g" && i+1 < len(argv) {
+			gid = intField(argv[i+1])
+		}
+	}
+	if f.group(name) != nil {
+		//nolint:staticcheck // ST1005: this is groupadd's own message, quoted
+		return "", fmt.Errorf("groupadd: group '%s' already exists", name)
+	}
+	if gid < 0 {
+		gid = f.nextGID()
+	} else {
+		for _, group := range f.model.Groups {
+			if group.GID == gid {
+				//nolint:staticcheck // ST1005: this is groupadd's own message, quoted
+				return "", fmt.Errorf("groupadd: GID '%d' already exists", gid)
+			}
+		}
+	}
+	f.model.Groups = append(f.model.Groups, accounts.Group{Name: name, GID: gid})
+	return "", nil
+}
+
+// deleteGroup applies a groupdel, with the two refusals the real one makes: a
+// group that is somebody's primary group, and one that does not exist.
+func (f *Fake) deleteGroup(argv []string) (string, error) {
+	name := argv[len(argv)-1]
+	group := f.group(name)
+	if group == nil {
+		//nolint:staticcheck // ST1005: this is groupdel's own message, quoted
+		return "", fmt.Errorf("groupdel: group '%s' does not exist", name)
+	}
+	if len(group.Primary) > 0 {
+		//nolint:staticcheck // ST1005: this is groupdel's own message, quoted
+		return "", fmt.Errorf(
+			"groupdel: cannot remove the primary group of user '%s'",
+			group.Primary[0])
+	}
+	if len(group.Members) > 0 {
+		return "", fmt.Errorf("groupdel: the group %s still has members", name)
+	}
+	kept := f.model.Groups[:0]
+	for _, existing := range f.model.Groups {
+		if existing.Name == name {
+			continue
+		}
+		kept = append(kept, existing)
+	}
+	f.model.Groups = kept
+	return "", nil
+}
+
 // setAging applies a chage -E or -M.
 func (f *Fake) setAging(argv []string) (string, error) {
 	if len(argv) < 4 {
@@ -615,6 +689,21 @@ func (f *Fake) BuildSetPassword(name, password string) (accounts.Command, error)
 // BuildGroupMembership adds a user to a group or removes them from it.
 func (f *Fake) BuildGroupMembership(add bool, user, group string) (accounts.Command, error) {
 	return BuildGroupMembership(add, user, group)
+}
+
+// BuildSudo grants or revokes sudo through the machine's sudo group.
+func (f *Fake) BuildSudo(grant bool, user, group string) (accounts.Command, error) {
+	return BuildSudo(grant, user, group)
+}
+
+// BuildCreateGroup creates a group.
+func (f *Fake) BuildCreateGroup(spec accounts.NewGroup) (accounts.Command, error) {
+	return BuildCreateGroup(spec)
+}
+
+// BuildDeleteGroup deletes an empty group.
+func (f *Fake) BuildDeleteGroup(group accounts.Group, allowSystem bool) (accounts.Command, error) {
+	return BuildDeleteGroup(group, allowSystem)
 }
 
 // BuildSetShell changes an account's login shell.

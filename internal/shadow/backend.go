@@ -25,7 +25,8 @@
 //	sudo        what one account may run, asked of sudo itself
 //	semanage    the SELinux login mapping, read-only
 //	ssh-keygen  the fingerprint of an authorized key
-//	useradd usermod userdel gpasswd chpasswd chage   the changes
+//	useradd usermod userdel gpasswd chpasswd chage   the account changes
+//	groupadd groupdel                                the group changes
 //	install tee                                      the authorized_keys writes
 //	cat ls      escalated reads of files a plain user cannot open
 package shadow
@@ -65,6 +66,8 @@ var searchPaths = map[string][]string{
 	"usermod":    {"/usr/sbin/usermod", "/sbin/usermod", "/usr/bin/usermod"},
 	"userdel":    {"/usr/sbin/userdel", "/sbin/userdel", "/usr/bin/userdel"},
 	"gpasswd":    {"/usr/bin/gpasswd", "/bin/gpasswd"},
+	"groupadd":   {"/usr/sbin/groupadd", "/sbin/groupadd", "/usr/bin/groupadd"},
+	"groupdel":   {"/usr/sbin/groupdel", "/sbin/groupdel", "/usr/bin/groupdel"},
 	"chpasswd":   {"/usr/sbin/chpasswd", "/sbin/chpasswd", "/usr/bin/chpasswd"},
 	"chage":      {"/usr/bin/chage", "/bin/chage"},
 	"install":    {"/usr/bin/install", "/bin/install"},
@@ -153,6 +156,8 @@ func NewReal(sudoPrefix []string, caps compat.Caps) (*Real, error) {
 		{bin: "usermod"},
 		{bin: "userdel"},
 		{bin: "gpasswd"},
+		{bin: "groupadd"},
+		{bin: "groupdel"},
 		{bin: "chpasswd"},
 		{bin: "install"},
 		{bin: "tee"},
@@ -239,6 +244,8 @@ func (r *Real) Capabilities() accounts.Capabilities {
 	caps.SupportsGroups = r.runners["gpasswd"] != nil
 	caps.SupportsExpiry = r.runners["chage"] != nil
 	caps.SupportsKeys = r.runners["install"] != nil && r.runners["tee"] != nil
+	caps.SupportsGroupCreate = r.runners["groupadd"] != nil
+	caps.SupportsGroupDelete = r.runners["groupdel"] != nil
 	return caps
 }
 
@@ -746,6 +753,21 @@ func (r *Real) BuildSetPassword(name, password string) (accounts.Command, error)
 // BuildGroupMembership adds a user to a group or removes them from it.
 func (r *Real) BuildGroupMembership(add bool, user, group string) (accounts.Command, error) {
 	return BuildGroupMembership(add, user, group)
+}
+
+// BuildSudo grants or revokes sudo through the machine's sudo group.
+func (r *Real) BuildSudo(grant bool, user, group string) (accounts.Command, error) {
+	return BuildSudo(grant, user, group)
+}
+
+// BuildCreateGroup creates a group.
+func (r *Real) BuildCreateGroup(spec accounts.NewGroup) (accounts.Command, error) {
+	return BuildCreateGroup(spec)
+}
+
+// BuildDeleteGroup deletes an empty group.
+func (r *Real) BuildDeleteGroup(group accounts.Group, allowSystem bool) (accounts.Command, error) {
+	return BuildDeleteGroup(group, allowSystem)
 }
 
 // BuildSetShell changes an account's login shell.
