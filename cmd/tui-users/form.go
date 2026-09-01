@@ -12,13 +12,14 @@ import (
 	"github.com/tui-tools/tui-users/internal/shadow"
 )
 
-// formKind says which form is open. Both are the same widget with a different
+// formKind says which form is open. They are the same widget with a different
 // field list, because there is exactly one way to fill in a form in this tool.
 type formKind int
 
 const (
 	formCreate formKind = iota
 	formExpiry
+	formGroup
 )
 
 // fieldKind tells a cycled choice from a free-text field.
@@ -173,6 +174,29 @@ func newExpiryForm(user accounts.User) userForm {
 	return f
 }
 
+// newGroupForm builds the form for a new group.
+//
+// The GID field is deliberately empty by default: a machine that picks its own
+// GIDs out of /etc/login.defs never collides with itself, and a number typed
+// here is one somebody has a reason for.
+func newGroupForm() userForm {
+	f := userForm{
+		kind:  formGroup,
+		title: "New group",
+		fields: []formField{
+			{key: "name", label: "Name", kind: fieldText,
+				input: text("developers", ""),
+				help:  "Lower case, starting with a letter or an underscore."},
+			{key: "gid", label: "GID", kind: fieldText,
+				input: text("(the next free one)", ""),
+				help: "groupadd -g. Optional: empty lets groupadd take the " +
+					"next free GID from the machine's own range."},
+		},
+	}
+	f.focusActive()
+	return f
+}
+
 // focusActive moves the text cursor to the active field.
 func (f *userForm) focusActive() {
 	for i := range f.fields {
@@ -264,6 +288,11 @@ func (f userForm) newUser() accounts.NewUser {
 		CreateHome: f.get("home") == answerYes,
 		System:     f.get("system") == answerYes,
 	}
+}
+
+// newGroup turns the group form into the spec the backend validates.
+func (f userForm) newGroup() accounts.NewGroup {
+	return accounts.NewGroup{Name: f.get("name"), GID: f.get("gid")}
 }
 
 // expiry turns the expiry form into the two values the backend takes.

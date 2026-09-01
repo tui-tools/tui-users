@@ -362,11 +362,12 @@ Every one of these is previewed and confirmed first.
 
 | Key | What runs |
 | --- | --- |
-| `n` | `useradd [-m] [-r] [-s <shell>] [-c <comment>] [-G <groups>] <name>` |
-| `D` | `userdel <name>`, or `userdel -r <name>` |
+| `n` | `useradd [-m] [-r] [-s <shell>] [-c <comment>] [-G <groups>] <name>`, or `groupadd [-g <gid>] <name>` on the groups screen |
+| `D` | `userdel <name>`, or `userdel -r <name>`; `groupdel <name>` on the groups screen |
 | `l` | `usermod -L <name>` / `usermod -U <name>` |
 | `p` | `chpasswd`, with `user:password` on standard input |
 | `a` / `x` | `gpasswd -a <user> <group>` / `gpasswd -d <user> <group>` |
+| `S` | `gpasswd -a <user> <sudo group>` / `gpasswd -d <user> <sudo group>` |
 | `s` | `usermod -s <shell> <user>` |
 | `e` | `chage -E <date> <user>`, `chage -M <days> <user>` |
 | `K` | `install -d -m 700 -o <user> -g <group> ~/.ssh`, then `tee -a ~/.ssh/authorized_keys`, or `install -m 600 -o <user> -g <group> <staged file> ~/.ssh/authorized_keys` to remove one |
@@ -374,6 +375,37 @@ Every one of these is previewed and confirmed first.
 Nothing else. There is no code path that writes to `/etc/sudoers`, and none
 that writes anywhere but an account's own `~/.ssh` — the home directory is
 validated first, and a relative one, `/`, or one carrying `..` is refused.
+
+### Sudo is a group, and the machine says which one
+
+`S` grants or revokes sudo, and the group it edits is the one that grants sudo
+**on this machine**: `wheel` on Arch, Fedora and RHEL, `sudo` on Debian and
+Ubuntu. The tool looks for the first of `wheel`, `sudo` and `admin` that exists
+here, and the confirm dialog names the one it found — the same fact is what the
+`+sudo` marker in the password column and the `member of` line on the detail
+screen are built from.
+
+A machine where none of the three exists gets no guess: the action is refused
+with the reason, because sudo is then granted by a rule in a sudoers file and
+this tool does not write those.
+
+The last account holding sudo cannot lose it here. Revoking from the only
+member of the group would leave the machine with no administrator but `root`,
+which is the one mistake a confirm dialog does not undo, so the key refuses it
+and says so.
+
+### Groups are created empty and deleted empty
+
+`n` on the groups screen creates a group; the GID is optional and empty lets
+`groupadd` take the next free one from the machine's own range. `D` deletes
+one, and only ever an **empty** one: a group somebody has as their primary
+group is refused, and so is one with supplementary members, because emptying it
+would silently change what each of those accounts can do. Members are added and
+removed from an account's own screen, with `a` and `x`.
+
+A **system group** — one outside the GID range `/etc/login.defs` declares — is
+refused unless its name is typed back, because a package created it and expects
+to find it there.
 
 ### Locking is not disabling
 
@@ -394,11 +426,12 @@ how many keys the account has.
 | `enter` | Open the selected account or group |
 | `esc` | Leave the detail screen |
 | `/` | Filter the current screen (matches any column; `esc` clears) |
-| `n` | Create an account |
-| `D` | Delete the account, with or without its home directory |
+| `n` | Create an account, or a group on the groups screen |
+| `D` | Delete the account, with or without its home directory; or an empty group |
 | `l` | Lock or unlock the account's password |
 | `p` | Set a password (never echoed, never in an argv) |
 | `a` / `x` | Add to a group / remove from one |
+| `S` | Grant or revoke sudo, through this machine's own sudo group |
 | `s` | Change the login shell |
 | `e` | Set the account expiry and the password lifetime |
 | `K` | Add an authorized key, or remove one, with a diff to confirm |
@@ -429,6 +462,9 @@ cancels.
 - Create and delete accounts, lock and unlock them, set a password, add and
   remove group memberships, change the login shell, set the account expiry and
   the password lifetime, and add or remove an authorized key.
+- Create a group with `groupadd`, and delete an empty one with `groupdel`.
+- Grant and revoke sudo with one key, through the group that grants it on this
+  machine — refusing to take it from the last account that has it.
 - Put the accounts worth a second look at the top, with the reason.
 - Follow the active Omarchy theme, and respect `NO_COLOR`.
 
@@ -440,8 +476,9 @@ cancels.
   is the obvious next step and is deliberately not in v0.1.
 - **No SELinux management.** The login mapping is shown where `semanage` exists;
   changing it belongs to a tool that owns SELinux.
-- **No group creation or deletion**, and no changing a group's members from the
-  groups screen. Membership is edited from the account.
+- **No changing a group's members from the groups screen.** A group is created
+  empty and deleted empty; membership is edited from the account, with `a` and
+  `x`. There is no renaming a group and no changing its GID either.
 - **No password policy beyond `chage`**: no PAM, no `pwquality`, no faillock.
 - **No LDAP, no systemd-homed, no AD.** `getent` answers for whatever NSS
   serves, so such accounts are *listed*, but every change here is a
@@ -472,7 +509,7 @@ hidden; one below the minimum is marked as such and the tool still runs.
 | Versions | What changes |
 | --- | --- |
 | `>=4.8` | shadow-utils prints no version from any of its programs: `useradd --version`, `chage --version` and every sibling answer "unrecognized option" on Arch, Debian and Fedora alike. This backend therefore declares no version command, and the header shows none for it |
-| `>=4.8` | the minimum above is informative, not enforced: it is the release whose flags this tool uses (`useradd -r -m -G`, `usermod -L -U -s`, `userdel -r`, `gpasswd -a -d`, `chage -E -M -l`), all far older than any supported distribution |
+| `>=4.8` | the minimum above is informative, not enforced: it is the release whose flags this tool uses (`useradd -r -m -G`, `usermod -L -U -s`, `userdel -r`, `gpasswd -a -d`, `groupadd -g`, `groupdel`, `chage -E -M -l`), all far older than any supported distribution |
 | `>=4.8` | reading the lock state and the expiry of an account needs `getent shadow`, which needs root; an unprivileged run lists every account and says the password state is unknown rather than implying it is fine |
 
 ### openssh
@@ -507,8 +544,9 @@ So this tool declares the backend without a version command, and the header
 shows a number for `openssh` instead — which is a version that genuinely
 changes what the tool can do, since `ssh-keygen -l` learned the `sk-` key types
 in 8.2. The flags `tui-users` uses (`useradd -r -m -G`, `usermod -L -U -s`,
-`userdel -r`, `gpasswd -a -d`, `chage -E -M -l`) are older than any supported
-distribution, which is why a shadow-utils minimum is stated and not enforced.
+`userdel -r`, `gpasswd -a -d`, `groupadd -g`, `groupdel`, `chage -E -M -l`) are
+older than any supported distribution, which is why a shadow-utils minimum is
+stated and not enforced.
 
 ## Configuration
 
@@ -547,8 +585,8 @@ SudoersFile{Path, Raw, Entries}
 `internal/shadow` is the only package that starts a process. It drives the
 account programs through one kit runner each — `getent`, `lastlog2`, `last`,
 `loginctl`, `id`, `chage`, `sudo`, `semanage`, `ssh-keygen` for the reads;
-`useradd`, `usermod`, `userdel`, `gpasswd`, `chpasswd`, `chage`, `install` and
-`tee` for the changes — and
+`useradd`, `usermod`, `userdel`, `gpasswd`, `groupadd`, `groupdel`, `chpasswd`,
+`chage`, `install` and `tee` for the changes — and
 [`check-exec.sh`](https://github.com/tui-tools/tui-kit/blob/main/tools/check-exec.sh)
 fails the build if any other package imports `os/exec`.
 
@@ -591,7 +629,11 @@ widgets, the config loader and the command runner shared by the whole family.
   the confirm dialog says which of the two you chose. An account that is logged
   in is refused before the command is even built.
 - Removing somebody from `wheel` or `sudo` can lock the only administrator out
-  of the machine. Both directions are marked destructive for that reason.
+  of the machine. Both directions are marked destructive for that reason, and
+  `S` refuses outright to take sudo from the last account that holds it.
+- A group is deleted only when nothing is in it, and a system group only after
+  its name has been typed back into a prompt. Neither refusal can be clicked
+  through: they happen before the command exists.
 - A password is written to `chpasswd` on standard input. It appears in no argv,
   no preview, no status line and no log.
 - An authorized key is validated with `ssh-keygen -lf` — in a private temporary

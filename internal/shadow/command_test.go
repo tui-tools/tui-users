@@ -180,6 +180,167 @@ func TestBuildGroupMembership(t *testing.T) {
 	}
 }
 
+// TestBuildSudoNamesTheGroup covers the wrapper's whole reason to exist: the
+// argv is the membership one, and the description says what it means.
+func TestBuildSudoNamesTheGroup(t *testing.T) {
+	grant, err := BuildSudo(true, "alice", "wheel")
+	if err != nil {
+		t.Fatalf("BuildSudo: %v", err)
+	}
+	if got := grant.String(); got != "gpasswd -a alice wheel" {
+		t.Errorf("argv %q", got)
+	}
+	if !strings.Contains(grant.Description, "Grant sudo to alice") ||
+		!strings.Contains(grant.Description, "wheel") {
+		t.Errorf("description = %q", grant.Description)
+	}
+
+	// On Debian the same key means the same thing through another group, and
+	// the confirm dialog has to say which one.
+	revoke, err := BuildSudo(false, "alice", "sudo")
+	if err != nil {
+		t.Fatalf("BuildSudo: %v", err)
+	}
+	if got := revoke.String(); got != "gpasswd -d alice sudo" {
+		t.Errorf("argv %q", got)
+	}
+	if !strings.Contains(revoke.Description, "Revoke sudo from alice") ||
+		!strings.Contains(revoke.Description, "the group sudo") {
+		t.Errorf("description = %q", revoke.Description)
+	}
+	if !revoke.Destructive {
+		t.Error("taking sudo away is a destructive change")
+	}
+
+	for _, bad := range []string{"wheel docker", "-x", ""} {
+		if _, err := BuildSudo(true, "alice", bad); err == nil {
+			t.Errorf("BuildSudo accepted the group %q", bad)
+		}
+	}
+	if _, err := BuildSudo(true, "Alice; reboot", "wheel"); err == nil {
+		t.Error("BuildSudo accepted a name that is not one")
+	}
+}
+
+func TestBuildCreateGroup(t *testing.T) {
+	auto, err := BuildCreateGroup(accounts.NewGroup{Name: "developers"})
+	if err != nil {
+		t.Fatalf("BuildCreateGroup: %v", err)
+	}
+	if got := auto.String(); got != "groupadd developers" {
+		t.Errorf("argv %q", got)
+	}
+	if auto.Description == "" {
+		t.Error("a command with no description cannot be confirmed")
+	}
+
+	chosen, err := BuildCreateGroup(accounts.NewGroup{Name: "developers",
+		GID: "1500"})
+	if err != nil {
+		t.Fatalf("BuildCreateGroup: %v", err)
+	}
+	if got := chosen.String(); got != "groupadd -g 1500 developers" {
+		t.Errorf("argv %q", got)
+	}
+	// A padded number reaches groupadd as the number it means.
+	padded, err := BuildCreateGroup(accounts.NewGroup{Name: "developers",
+		GID: " 007 "})
+	if err != nil {
+		t.Fatalf("BuildCreateGroup: %v", err)
+	}
+	if got := padded.String(); got != "groupadd -g 7 developers" {
+		t.Errorf("argv %q", got)
+	}
+}
+
+func TestBuildCreateGroupRejects(t *testing.T) {
+	// The name and the GID both end up in an argv run as root.
+	for _, spec := range []accounts.NewGroup{
+		{},
+		{Name: "Developers"},
+		{Name: "dev; reboot"},
+		{Name: "dev team"},
+		{Name: "developers", GID: "-1"},
+		{Name: "developers", GID: "1e3"},
+		{Name: "developers", GID: "99999999"},
+		{Name: "developers", GID: "0x10"},
+	} {
+		if _, err := BuildCreateGroup(spec); err == nil {
+			t.Errorf("BuildCreateGroup accepted %+v", spec)
+		}
+	}
+}
+
+func TestBuildDeleteGroup(t *testing.T) {
+	empty := accounts.Group{Name: "developers", GID: 1500}
+	cmd, err := BuildDeleteGroup(empty, false)
+	if err != nil {
+		t.Fatalf("BuildDeleteGroup: %v", err)
+	}
+	if got := cmd.String(); got != "groupdel developers" {
+		t.Errorf("argv %q", got)
+	}
+	if !cmd.Destructive {
+		t.Error("deleting a group is a destructive change")
+	}
+}
+
+// TestBuildDeleteGroupRefusals is the whole safety of the action: a group that
+// still means something to an account is never deleted, and a package's group
+// needs the extra answer.
+func TestBuildDeleteGroupRefusals(t *testing.T) {
+	tests := []struct {
+		name  string
+		group accounts.Group
+		want  string
+	}{
+		{
+			name: "a supplementary member",
+			group: accounts.Group{Name: "docker", GID: 1500,
+				Members: []string{"bob"}},
+			want: "member",
+		},
+		{
+			name: "somebody's primary group",
+			group: accounts.Group{Name: "alice", GID: 1000,
+				Primary: []string{"alice"}},
+			want: "primary group",
+		},
+		{
+			name:  "a system group",
+			group: accounts.Group{Name: "wheel", GID: 10, System: true},
+			want:  "system group",
+		},
+		{
+			name:  "a name that is not one",
+			group: accounts.Group{Name: "wheel; reboot"},
+			want:  "not a valid group name",
+		},
+	}
+	for _, test := range tests {
+		_, err := BuildDeleteGroup(test.group, false)
+		if err == nil {
+			t.Errorf("%s: BuildDeleteGroup accepted it", test.name)
+			continue
+		}
+		if !strings.Contains(err.Error(), test.want) {
+			t.Errorf("%s: error = %q, want it to mention %q",
+				test.name, err, test.want)
+		}
+	}
+
+	// allowSystem is the typed confirmation, and it lifts that refusal only.
+	system := accounts.Group{Name: "wheel", GID: 10, System: true}
+	if _, err := BuildDeleteGroup(system, true); err != nil {
+		t.Errorf("BuildDeleteGroup refused a confirmed system group: %v", err)
+	}
+	populated := accounts.Group{Name: "wheel", GID: 10, System: true,
+		Members: []string{"alice"}}
+	if _, err := BuildDeleteGroup(populated, true); err == nil {
+		t.Error("a group with members is refused however it was confirmed")
+	}
+}
+
 func TestBuildSetShell(t *testing.T) {
 	cmd, err := BuildSetShell("alice", "/usr/bin/fish")
 	if err != nil {

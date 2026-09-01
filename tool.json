@@ -3,7 +3,7 @@
   "name": "tui-users",
   "binary": "tui-users",
   "tagline": "Accounts, groups, keys and sudo, with every change previewed before it runs",
-  "description": "A terminal UI for the machine's local accounts. It lists every account with the facts that decide what it can do — uid, primary group, groups, shell, last login, whether the password is usable, locked or missing — and puts the ones worth a second look at the top, with the reason: a second account with uid 0, an empty password, a service account with a login shell.\n\nOpen an account and you get the whole picture: its aging policy in words rather than in days-since-1970, the authorized keys in its `~/.ssh` with their fingerprints, what `sudo` says it may run, and its open sessions. A second screen lists the groups with their real membership, primary members included; a third quotes every rule in `/etc/sudoers` and `/etc/sudoers.d`, marking the ones that run without a password.\n\nChanges are previewed: creating an account, deleting it, locking it, setting a password, editing group membership, changing the shell, setting an expiry, adding or removing an authorized key. A password never reaches a command line — it goes to `chpasswd` on standard input.\n\nRun `tui-users --demo` to drive a sample machine: every key works and nothing touches your system.",
+  "description": "A terminal UI for the machine's local accounts. It lists every account with the facts that decide what it can do — uid, primary group, groups, shell, last login, whether the password is usable, locked or missing — and puts the ones worth a second look at the top, with the reason: a second account with uid 0, an empty password, a service account with a login shell.\n\nOpen an account and you get the whole picture: its aging policy in words rather than in days-since-1970, the authorized keys in its `~/.ssh` with their fingerprints, what `sudo` says it may run, and its open sessions. A second screen lists the groups with their real membership, primary members included; a third quotes every rule in `/etc/sudoers` and `/etc/sudoers.d`, marking the ones that run without a password.\n\nChanges are previewed: creating and deleting accounts and groups, locking an account, setting a password, granting or revoking sudo, editing group membership, the login shell, the expiry, and authorized keys. A password never reaches a command line — it goes to `chpasswd` on standard input.\n\nRun `tui-users --demo` to drive a sample machine: every key works and nothing touches your system.",
   "category": "users",
   "homepage": "https://github.com/tui-tools/tui-users",
   "repo": "https://github.com/tui-tools/tui-users",
@@ -51,7 +51,7 @@
     },
     {
       "key": "n / D",
-      "action": "Create an account / delete one, with or without its home"
+      "action": "Create an account or a group / delete one; a group has to be empty first"
     },
     {
       "key": "l",
@@ -64,6 +64,10 @@
     {
       "key": "a / x",
       "action": "Add the account to a group / remove it from one"
+    },
+    {
+      "key": "S",
+      "action": "Grant or revoke sudo through the group that grants it on this machine"
     },
     {
       "key": "s",
@@ -107,7 +111,7 @@
         },
         {
           "range": ">=4.8",
-          "impact": "the minimum above is informative, not enforced: it is the release whose flags this tool uses (`useradd -r -m -G`, `usermod -L -U -s`, `userdel -r`, `gpasswd -a -d`, `chage -E -M -l`), all far older than any supported distribution"
+          "impact": "the minimum above is informative, not enforced: it is the release whose flags this tool uses (`useradd -r -m -G`, `usermod -L -U -s`, `userdel -r`, `gpasswd -a -d`, `groupadd -g`, `groupdel`, `chage -E -M -l`), all far older than any supported distribution"
         },
         {
           "range": ">=4.8",

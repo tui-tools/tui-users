@@ -397,6 +397,33 @@ func (m Model) GroupNames() []string {
 	return out
 }
 
+// SudoGroup names the group that grants sudo on this machine: the first of the
+// candidates that exists here. It is wheel on Arch, Fedora and RHEL and sudo on
+// Debian and Ubuntu, and asking the machine rather than guessing is what lets
+// one key mean "grant sudo" on both.
+//
+// A machine where none of them exists gets no guess: sudo is then granted by a
+// rule in a sudoers file, and this tool does not write those.
+func (m Model) SudoGroup(candidates []string) (string, bool) {
+	for _, name := range candidates {
+		if _, ok := m.Group(name); ok {
+			return name, true
+		}
+	}
+	return "", false
+}
+
+// SudoMembers are the accounts that hold sudo through a group, the ones whose
+// primary group it is folded in. It is what answers "is this the last
+// administrator" before a revocation.
+func (m Model) SudoMembers(group string) []string {
+	found, ok := m.Group(group)
+	if !ok {
+		return nil
+	}
+	return found.All()
+}
+
 // SessionsFor returns the sessions belonging to one user.
 func (m Model) SessionsFor(name string) []Session {
 	var out []Session
@@ -470,6 +497,14 @@ type NewUser struct {
 	Comment string
 }
 
+// NewGroup is what the create-group form asks for.
+type NewGroup struct {
+	Name string
+	// GID is the group id to ask groupadd for, as it was typed. Empty leaves
+	// groupadd to pick the next free one from the machine's own range.
+	GID string
+}
+
 // KeyPlan is a change to an authorized_keys file: what the file will look
 // like, how that differs from what is there now, and the exact commands that
 // apply it.
@@ -507,6 +542,10 @@ type Capabilities struct {
 	SupportsShell    bool
 	SupportsExpiry   bool
 	SupportsKeys     bool
+	// SupportsGroupCreate and SupportsGroupDelete are groupadd and groupdel,
+	// which are their own programs and can be missing on their own.
+	SupportsGroupCreate bool
+	SupportsGroupDelete bool
 }
 
 // Backend is the boundary between the UI and the machine. Load reads state;
@@ -543,6 +582,14 @@ type Backend interface {
 	BuildSetPassword(name, password string) (Command, error)
 	// BuildGroupMembership adds the user to a group or removes them from it.
 	BuildGroupMembership(add bool, user, group string) (Command, error)
+	// BuildSudo grants or revokes sudo through the group that grants it on this
+	// machine, which the caller names.
+	BuildSudo(grant bool, user, group string) (Command, error)
+	// BuildCreateGroup creates a group.
+	BuildCreateGroup(spec NewGroup) (Command, error)
+	// BuildDeleteGroup deletes a group that has no members. allowSystem is the
+	// caller's answer to the extra confirmation a system group needs.
+	BuildDeleteGroup(group Group, allowSystem bool) (Command, error)
 	// BuildSetShell changes the login shell.
 	BuildSetShell(user, shell string) (Command, error)
 	// BuildSetExpiry sets the account expiry date and the password lifetime.

@@ -46,6 +46,9 @@ const (
 	inputNone inputTarget = iota
 	inputPassword
 	inputKey
+	// inputGroupName is the typed confirmation a system group's deletion asks
+	// for: the name, back, before the dialog is even offered.
+	inputGroupName
 )
 
 // pickerTarget says what an open picker is choosing.
@@ -390,6 +393,8 @@ func (a *app) handleInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return a, a.confirmPassword(name, value)
 	case inputKey:
 		return a, a.confirmAddKey(name, value)
+	case inputGroupName:
+		return a, a.confirmDeleteSystemGroup(name, value)
 	default:
 		return a, nil
 	}
@@ -517,6 +522,23 @@ func (a *app) submitForm() tea.Cmd {
 			Command: a.previewAll(commands),
 			Danger:  true,
 			Payload: plan{title: "Set the expiry", commands: commands},
+		}
+		return nil
+	case formGroup:
+		spec := a.form.newGroup()
+		cmd, err := a.backend.BuildCreateGroup(spec)
+		if err != nil {
+			a.setStatus(ui.StatusError, err.Error())
+			return nil
+		}
+		a.mode = modeConfirm
+		a.confirm = ui.Confirm{
+			Title: "Create the group " + spec.Name,
+			Body: cmd.Description + ".\nIt starts empty: accounts join it from " +
+				"their own screen, with a.",
+			Command: a.backend.Preview(cmd),
+			Payload: plan{title: "Create the group",
+				commands: []accounts.Command{cmd}},
 		}
 		return nil
 	}
@@ -647,6 +669,8 @@ func (a *app) handleGroupsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "R", "ctrl+r":
 		a.loading = true
 		return a, a.load()
+	default:
+		return a, a.handleGroupActionKey(msg)
 	}
 	return a, nil
 }
@@ -666,8 +690,22 @@ func (a *app) handleGroupDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "R", "ctrl+r":
 		a.loading = true
 		return a, a.load()
+	default:
+		return a, a.handleGroupActionKey(msg)
 	}
 	return a, nil
+}
+
+// handleGroupActionKey handles the keys that mean the same thing on the groups
+// list and on one group's members screen.
+func (a *app) handleGroupActionKey(msg tea.KeyMsg) tea.Cmd {
+	switch msg.String() {
+	case "n":
+		return a.openGroupForm()
+	case "D":
+		return a.promptDeleteGroup()
+	}
+	return nil
 }
 
 // handleSudoersKey handles the sudoers screen, which is read-only in v0.1.
@@ -733,6 +771,8 @@ func (a *app) handleActionKey(msg tea.KeyMsg) tea.Cmd {
 		return a.promptGroup(true)
 	case "x":
 		return a.promptGroup(false)
+	case "S":
+		return a.confirmSudo()
 	case "s":
 		return a.promptShell()
 	case "e":
@@ -773,6 +813,34 @@ func (a *app) currentGroup() (accounts.Group, bool) {
 	return a.visibleGroups[a.groups.cursor], true
 }
 
+// groupTarget is the group the group actions apply to: the one the members
+// screen is showing, or the highlighted row of the list. The model's copy wins,
+// so a deletion is judged on the membership of the last read rather than on the
+// one the screen was opened with.
+func (a *app) groupTarget() (accounts.Group, bool) {
+	group, ok := a.currentGroup()
+	if a.mode == modeGroupDetail && a.group.Name != "" {
+		group, ok = a.group, true
+	}
+	if !ok {
+		return accounts.Group{}, false
+	}
+	if current, found := a.model.Group(group.Name); found {
+		return current, true
+	}
+	return group, true
+}
+
+// requireGroup returns the current group, or says there is none.
+func (a *app) requireGroup() (accounts.Group, bool) {
+	group, ok := a.groupTarget()
+	if !ok {
+		a.setStatus(ui.StatusWarn, "no group selected")
+		return accounts.Group{}, false
+	}
+	return group, true
+}
+
 // openDetail re-reads the highlighted account and opens its screen.
 func (a *app) openDetail() tea.Cmd {
 	user, ok := a.requireUser()
@@ -810,6 +878,155 @@ func (a *app) openExpiryForm() tea.Cmd {
 	a.previous = a.mode
 	a.mode = modeForm
 	return nil
+}
+
+// openGroupForm opens the guided form for a new group.
+func (a *app) openGroupForm() tea.Cmd {
+	if !a.caps.SupportsGroupCreate {
+		a.setStatus(ui.StatusWarn, "groupadd is not available on this machine")
+		return nil
+	}
+	a.form = newGroupForm()
+	a.previous = a.mode
+	a.mode = modeForm
+	return nil
+}
+
+// promptDeleteGroup deletes the selected group, or says why it will not.
+//
+// A group with members is refused outright, because emptying it would change
+// what every one of those accounts can do. A system group is refused too,
+// unless its name is typed back: the GID range the machine declares in
+// /etc/login.defs is what tells a package's group from a person's.
+func (a *app) promptDeleteGroup() tea.Cmd {
+	if !a.caps.SupportsGroupDelete {
+		a.setStatus(ui.StatusWarn, "groupdel is not available on this machine")
+		return nil
+	}
+	group, ok := a.requireGroup()
+	if !ok {
+		return nil
+	}
+	if members := group.All(); len(members) > 0 {
+		a.setStatusf(ui.StatusWarn,
+			"%s still has %d member(s) — %s — so it cannot be deleted; "+
+				"remove them from their own screens first",
+			group.Name, len(members), strings.Join(members, ", "))
+		return nil
+	}
+	if group.System {
+		a.input = ui.NewInput("Delete the system group "+group.Name,
+			group.Name, "")
+		a.input.Help = fmt.Sprintf(
+			"gid %d is outside the machine's human range, so a package owns "+
+				"this group. Type %s to confirm; anything else cancels.",
+			group.GID, group.Name)
+		a.input.Payload = group.Name
+		a.inputFor = inputGroupName
+		a.previous = a.mode
+		a.mode = modeInput
+		return nil
+	}
+	return a.confirmDeleteGroup(group, false)
+}
+
+// confirmDeleteSystemGroup opens the dialog only when the typed name is the
+// group's own.
+func (a *app) confirmDeleteSystemGroup(name, typed string) tea.Cmd {
+	if strings.TrimSpace(typed) != name {
+		a.setStatusf(ui.StatusWarn,
+			"that is not %s: the system group was left alone", name)
+		return nil
+	}
+	group, ok := a.model.Group(name)
+	if !ok {
+		a.setStatusf(ui.StatusError, "no group named %s", name)
+		return nil
+	}
+	return a.confirmDeleteGroup(group, true)
+}
+
+// confirmDeleteGroup opens the confirm dialog for a group deletion.
+func (a *app) confirmDeleteGroup(group accounts.Group, allowSystem bool) tea.Cmd {
+	cmd, err := a.backend.BuildDeleteGroup(group, allowSystem)
+	if err != nil {
+		a.setStatus(ui.StatusError, err.Error())
+		return nil
+	}
+	body := fmt.Sprintf("%s (gid %d).\nIt has no members, so no account loses "+
+		"anything. Files owned by that gid stay, owned by a group nobody has.",
+		cmd.Description, group.GID)
+	if allowSystem {
+		body += "\nThis is a system group: whatever package created it expects " +
+			"to find it there."
+	}
+	a.openConfirm("Delete the group "+group.Name, body, cmd)
+	return nil
+}
+
+// confirmSudo grants or revokes sudo for the current account.
+//
+// It is the group membership action with the group filled in by the machine —
+// wheel here, sudo there — because "give this person sudo" is the question, and
+// which group answers it is the distribution's business rather than the
+// operator's.
+func (a *app) confirmSudo() tea.Cmd {
+	if !a.caps.SupportsGroups {
+		a.setStatus(ui.StatusWarn, "gpasswd is not available on this machine")
+		return nil
+	}
+	user, ok := a.requireUser()
+	if !ok {
+		return nil
+	}
+	group, ok := a.model.SudoGroup(a.caps.SudoGroups)
+	if !ok {
+		a.setStatusf(ui.StatusWarn,
+			"no sudo-granting group exists here (looked for %s): sudo must then "+
+				"come from a rule in /etc/sudoers, which this tool does not edit",
+			strings.Join(a.caps.SudoGroups, ", "))
+		return nil
+	}
+
+	members := a.model.SudoMembers(group)
+	grant := !holdsSudo(user, group)
+	if !grant && len(members) <= 1 {
+		a.setStatusf(ui.StatusWarn,
+			"%s is the only member of %s — revoking it would leave the machine "+
+				"with no administrator but root", user.Name, group)
+		return nil
+	}
+
+	cmd, err := a.backend.BuildSudo(grant, user.Name, group)
+	if err != nil {
+		a.setStatus(ui.StatusError, err.Error())
+		return nil
+	}
+	body := cmd.Description + "."
+	if grant {
+		body += fmt.Sprintf("\nOn this machine %s is what grants sudo: every "+
+			"account in it can become root. Check the sudo rules screen for "+
+			"what the group is actually given.", group)
+	} else {
+		body += fmt.Sprintf("\n%d other account(s) keep sudo through %s.\n"+
+			"A rule naming %s directly in a sudoers file would survive this — "+
+			"the sudo rules screen is where to look.",
+			len(members)-1, group, user.Name)
+	}
+	a.openConfirm(cmd.Description, body, cmd)
+	return nil
+}
+
+// holdsSudo reports whether an account already holds sudo through a group. It
+// reads the memberships the backend's own sudo detection put on the account, so
+// the answer is the one the list column and the detail screen show.
+func holdsSudo(user accounts.User, group string) bool {
+	for _, name := range user.Sudo.Groups {
+		if name == group {
+			return true
+		}
+	}
+	return false
 }
 
 // deleteWithHome and deleteKeepHome are the two answers the delete picker
