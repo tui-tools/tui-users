@@ -33,7 +33,9 @@ package shadow
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
@@ -631,15 +633,46 @@ func (r *Real) loadKeys(ctx context.Context, user *accounts.User) {
 	user.KeysPath = KeysPath(user.Home)
 	raw, err := r.readFile(ctx, user.KeysPath)
 	if err != nil {
-		if os.IsNotExist(err) {
-			// Not an error: most accounts have no authorized keys at all.
-			return
-		}
-		user.KeysNote = runner.FirstLine(err.Error())
+		user.KeysNote = keysNote(err, r.root)
 		return
 	}
 	user.Keys = ParseAuthorizedKeys(raw)
 	user.Keys = r.fingerprint(ctx, user.Keys)
+}
+
+// keysNote turns a failed authorized_keys read into the words the detail
+// screen shows next to an empty key list.
+//
+// A file that is not there is not a failure: most accounts have no authorized
+// keys at all, so it gets an empty note and the screen falls through to
+// "(none in <path>)", the way every other empty section on that screen says
+// something in words. A file that is there and may not be read says so.
+//
+// The read fails in two shapes. Reading it directly returns a typed error;
+// reading it through the escalated `cat` returns whatever cat printed, wrapped
+// by the runner into one line. The runner pins LANG and LC_ALL to C, so the
+// text below is the text cat and sudo produce.
+func keysNote(err error, root bool) string {
+	if err == nil || errors.Is(err, fs.ErrNotExist) {
+		return ""
+	}
+	text := runner.FirstLine(err.Error())
+	lower := strings.ToLower(text)
+	switch {
+	case strings.Contains(lower, "no such file or directory"):
+		return ""
+	case errors.Is(err, fs.ErrPermission),
+		strings.Contains(lower, "permission denied"),
+		strings.Contains(lower, "operation not permitted"),
+		strings.Contains(lower, "sudo needs a password"):
+		if root {
+			// Already root: whatever kept us out, "run as root" is not the
+			// answer, so the failure itself is the more useful note.
+			return text
+		}
+		return "not readable without root"
+	}
+	return text
 }
 
 // fingerprint runs `ssh-keygen -lf` over the keys, staged in a temporary file
