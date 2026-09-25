@@ -24,7 +24,7 @@ func TestBuildCreateUser(t *testing.T) {
 			spec: accounts.NewUser{Name: "alice", Shell: "/bin/bash",
 				Comment: "Alice Moreira", Groups: []string{"wheel", "docker"},
 				CreateHome: true},
-			want: "useradd -m -s /bin/bash -c Alice Moreira -G wheel,docker alice",
+			want: "useradd -m -s /bin/bash -c 'Alice Moreira' -G wheel,docker alice",
 		},
 		{
 			name: "a service",
