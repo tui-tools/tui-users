@@ -4,9 +4,8 @@
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/14368/badge)](https://www.bestpractices.dev/projects/14368)
 
 <!-- stability:start -->
-> **Beta.** The family is days old and still changing. Package names, flags
-> and keys may move without notice until 1.0. Pin versions, and report what
-> breaks.
+> **Beta** tools may still change keys, flags or output before their 1.0;
+> stable tools follow semver. Pin versions, and report what breaks.
 <!-- stability:end -->
 
 A terminal UI for the machine's local accounts. It shows who exists, what each
@@ -130,7 +129,7 @@ Upgrades then arrive with the rest of your system updates.
 ### Any distribution, static binary
 
 ```sh
-curl -fsSL https://github.com/tui-tools/tui-users/releases/download/v0.2.2/tui-users_0.2.2_linux_amd64.tar.gz | tar -xz tui-users
+curl -fsSL https://github.com/tui-tools/tui-users/releases/download/v0.2.4/tui-users_0.2.4_linux_amd64.tar.gz | tar -xz tui-users
 sudo install -m0755 tui-users /usr/local/bin/tui-users
 ```
 
