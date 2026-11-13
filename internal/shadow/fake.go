@@ -290,7 +290,7 @@ func (f *Fake) Ran() []accounts.Command { return f.run.Ran }
 // the change the real command would have made, so the demo stays coherent as
 // keys are pressed.
 func (f *Fake) apply(cmd accounts.Command) (string, error) {
-	argv := cmd.Argv
+	argv := withoutRunAs(cmd.Argv)
 	if len(argv) == 0 {
 		return "", nil
 	}
@@ -314,7 +314,7 @@ func (f *Fake) apply(cmd accounts.Command) (string, error) {
 	case "chage":
 		return f.setAging(argv)
 	case "install":
-		return f.install(argv)
+		return f.install(argv, cmd.Stdin)
 	case "tee":
 		return f.appendFile(argv, cmd.Stdin)
 	}
@@ -583,10 +583,19 @@ func (f *Fake) setAging(argv []string) (string, error) {
 	return "", nil
 }
 
+// withoutRunAs strips the `runuser -u <name> --` a key-file command runs
+// behind, so the sample machine applies the command itself.
+func withoutRunAs(argv []string) []string {
+	if len(argv) < 5 || argv[0] != RunAs || argv[1] != "-u" || argv[3] != "--" {
+		return argv
+	}
+	return argv[4:]
+}
+
 // install applies an `install`: either the directory creation, which the
-// sample machine has nothing to record, or the copy of a staged file over an
-// authorized_keys file.
-func (f *Fake) install(argv []string) (string, error) {
+// sample machine has nothing to record, or the copy of stdin or /dev/null over
+// an authorized_keys file.
+func (f *Fake) install(argv []string, stdin string) (string, error) {
 	if len(argv) > 1 && argv[1] == "-d" {
 		return "", nil
 	}
@@ -594,8 +603,12 @@ func (f *Fake) install(argv []string) (string, error) {
 		return "", fmt.Errorf("install: not enough arguments")
 	}
 	source, destination := argv[len(argv)-2], argv[len(argv)-1]
-	if source == "/dev/null" {
+	switch source {
+	case "/dev/null":
 		f.files[destination] = ""
+		return "", nil
+	case "/dev/stdin":
+		f.files[destination] = stdin
 		return "", nil
 	}
 	content, ok := f.files[source]
@@ -720,7 +733,8 @@ func (f *Fake) BuildSetExpiry(user, expires, maxDays string) ([]accounts.Command
 // and the same commands. --demo writes nothing at all, so the file it appends
 // to is a map entry.
 func (f *Fake) BuildAddKey(user accounts.User, key string) (accounts.KeyPlan, error) {
-	return keyAppendPlan(user, strings.TrimSpace(key), f.files[KeysPath(user.Home)])
+	return keyAppendPlan(user, strings.TrimSpace(key), f.files[KeysPath(user.Home)],
+		ProgramNames)
 }
 
 // BuildRemoveKey rewrites the sample machine's authorized_keys without one key.
@@ -730,23 +744,5 @@ func (f *Fake) BuildRemoveKey(user accounts.User, key accounts.Key) (accounts.Ke
 	if !ok {
 		return accounts.KeyPlan{}, fmt.Errorf("shadow: %s does not exist", filePath)
 	}
-	after, removed := WithoutKey(before, key)
-	if !removed {
-		return accounts.KeyPlan{}, fmt.Errorf(
-			"shadow: %s no longer holds that key on line %d — reload and try again",
-			filePath, key.Line)
-	}
-	temp := "/tmp/tui-users/" + KeysFile
-	f.files[temp] = after
-	installCmd, err := BuildInstallKeys(user, temp)
-	if err != nil {
-		return accounts.KeyPlan{}, err
-	}
-	return accounts.KeyPlan{
-		Path:     filePath,
-		Content:  after,
-		Diff:     Diff(filePath, before, after),
-		TempPath: temp,
-		Commands: []accounts.Command{installCmd},
-	}, nil
+	return keyRemovePlan(user, key, before, ProgramNames)
 }

@@ -1228,7 +1228,7 @@ func (a *app) promptShell() tea.Cmd {
 func (a *app) promptKey() tea.Cmd {
 	if !a.caps.SupportsKeys {
 		a.setStatus(ui.StatusWarn,
-			"install and tee are needed to write an authorized_keys file")
+			"runuser, install, tee and cat are needed to manage authorized_keys")
 		return nil
 	}
 	user, ok := a.requireUser()
@@ -1303,7 +1303,7 @@ const (
 func (a *app) promptKeys() tea.Cmd {
 	if !a.caps.SupportsKeys {
 		a.setStatus(ui.StatusWarn,
-			"install and tee are needed to write an authorized_keys file")
+			"runuser, install, tee and cat are needed to manage authorized_keys")
 		return nil
 	}
 	user, ok := a.requireUser()

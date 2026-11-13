@@ -27,7 +27,9 @@
 //	ssh-keygen  the fingerprint of an authorized key
 //	useradd usermod userdel gpasswd chpasswd chage   the account changes
 //	groupadd groupdel                                the group changes
-//	install tee                                      the authorized_keys writes
+//	runuser install tee cat   the authorized_keys reads and writes, run as
+//	                          the account itself (see RunAs)
+//	stat        the no-follow check of ~/.ssh when lstat is not allowed
 //	cat ls      escalated reads of files a plain user cannot open
 package shadow
 
@@ -42,6 +44,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 
 	"github.com/tui-tools/tui-kit/compat"
 	"github.com/tui-tools/tui-kit/runner"
@@ -74,6 +77,8 @@ var searchPaths = map[string][]string{
 	"chage":      {"/usr/bin/chage", "/bin/chage"},
 	"install":    {"/usr/bin/install", "/bin/install"},
 	"tee":        {"/usr/bin/tee", "/bin/tee"},
+	"runuser":    {"/usr/sbin/runuser", "/sbin/runuser", "/usr/bin/runuser"},
+	"stat":       {"/usr/bin/stat", "/bin/stat"},
 	"cat":        {"/usr/bin/cat", "/bin/cat"},
 	"ls":         {"/usr/bin/ls", "/bin/ls"},
 }
@@ -108,6 +113,9 @@ type Real struct {
 	// often as the machine is reinstalled.
 	limits accounts.Limits
 	shells []string
+	// programs are the resolved paths of the commands a key-file read or
+	// write runs as the account, through runuser.
+	programs Programs
 }
 
 // Available reports whether the account database can be read at all.
@@ -153,6 +161,10 @@ func NewReal(sudoPrefix []string, caps compat.Caps) (*Real, error) {
 		{bin: "cat", privilegedReads: true},
 		{bin: "ls", privilegedReads: true},
 		{bin: "chage", privilegedReads: true},
+		// runuser only works for root, and stat is the escalated lstat of a
+		// home directory the user cannot enter.
+		{bin: "runuser", privilegedReads: true},
+		{bin: "stat", privilegedReads: true},
 		// The changes. Their reads never happen; Run escalates on its own.
 		{bin: "useradd"},
 		{bin: "usermod"},
@@ -201,6 +213,8 @@ func NewReal(sudoPrefix []string, caps compat.Caps) (*Real, error) {
 		real.runners["getent-root"] = r
 	}
 
+	real.programs = resolvedPrograms(real.runners)
+
 	real.limits = accounts.DefaultLimits()
 	if raw, err := os.ReadFile(loginDefsPath); err == nil {
 		real.limits = ParseLoginDefs(string(raw))
@@ -245,7 +259,9 @@ func (r *Real) Capabilities() accounts.Capabilities {
 	caps.SupportsPassword = r.runners["chpasswd"] != nil
 	caps.SupportsGroups = r.runners["gpasswd"] != nil
 	caps.SupportsExpiry = r.runners["chage"] != nil
-	caps.SupportsKeys = r.runners["install"] != nil && r.runners["tee"] != nil
+	caps.SupportsKeys = r.runners["runuser"] != nil &&
+		r.runners["install"] != nil && r.runners["tee"] != nil &&
+		r.runners["cat"] != nil
 	caps.SupportsGroupCreate = r.runners["groupadd"] != nil
 	caps.SupportsGroupDelete = r.runners["groupdel"] != nil
 	return caps
@@ -539,8 +555,9 @@ func (r *Real) listSudoersDir(ctx context.Context) []string {
 //
 // The plain read costs nothing and is what a process already running as root
 // does. The fallback exists because the files worth reading here — /etc/shadow
-// aside, which getent answers for — are root-only by design: a sudoers file,
-// and an authorized_keys file in a home directory nobody else may enter.
+// aside, which getent answers for — are root-only by design: a sudoers file.
+// An authorized_keys file is not read here but by readKeys, as its account,
+// unless runuser is missing and nothing will be written.
 func (r *Real) readFile(ctx context.Context, filePath string) (string, error) {
 	raw, err := os.ReadFile(filePath) //nolint:gosec // the paths are fixed system files and home directories from the passwd database
 	if err == nil {
@@ -554,6 +571,124 @@ func (r *Real) readFile(ctx context.Context, filePath string) (string, error) {
 		return "", err
 	}
 	return cat.Read(ctx, "cat", "--", filePath)
+}
+
+// resolvedPrograms takes the paths the runners resolved for the commands a
+// key-file change runs as the account, so runuser is handed an absolute path
+// rather than a name it would look up on its own PATH.
+func resolvedPrograms(runners map[string]*runner.Runner) Programs {
+	programs := ProgramNames
+	if r := runners["install"]; r != nil {
+		programs.Install = r.Bin
+	}
+	if r := runners["tee"]; r != nil {
+		programs.Tee = r.Bin
+	}
+	if r := runners["cat"]; r != nil {
+		programs.Cat = r.Bin
+	}
+	return programs
+}
+
+// unsafeKeysError is a refusal from CheckKeyPaths, kept apart from a read that
+// merely failed so the detail screen can show it as it is.
+type unsafeKeysError struct{ err error }
+
+func (e *unsafeKeysError) Error() string { return e.err.Error() }
+func (e *unsafeKeysError) Unwrap() error { return e.err }
+
+// lstat reports what a path is without following it.
+//
+// The plain lstat is what a root process does, and it costs nothing. A user
+// who may not enter the home directory gets EACCES instead, and the fallback is
+// `stat` without -L through the privilege prefix, which does not follow a
+// symlink either.
+func (r *Real) lstat(ctx context.Context, filePath string) (PathState, error) {
+	info, err := os.Lstat(filePath)
+	switch {
+	case err == nil:
+		return pathStateOf(info), nil
+	case os.IsNotExist(err):
+		return PathState{Kind: KindMissing}, nil
+	case !os.IsPermission(err) || r.runners["stat"] == nil:
+		return PathState{}, err
+	}
+	out, err := r.runners["stat"].Read(ctx, "stat", "-c", "%u %F", "--", filePath)
+	if err != nil {
+		if strings.Contains(strings.ToLower(out+" "+err.Error()),
+			"no such file or directory") {
+			return PathState{Kind: KindMissing}, nil
+		}
+		return PathState{}, err
+	}
+	return ParseStat(out)
+}
+
+// pathStateOf turns an lstat result into a PathState.
+func pathStateOf(info os.FileInfo) PathState {
+	state := PathState{Kind: KindOther, UID: -1}
+	switch mode := info.Mode(); {
+	case mode&os.ModeSymlink != 0:
+		state.Kind = KindSymlink
+	case mode.IsDir():
+		state.Kind = KindDir
+	case mode.IsRegular():
+		state.Kind = KindFile
+	}
+	if sys, ok := info.Sys().(*syscall.Stat_t); ok {
+		state.UID = int(sys.Uid)
+	}
+	return state
+}
+
+// checkKeyPaths lstats ~/.ssh and authorized_keys and refuses when either
+// could redirect a read or a write. It reports whether the file exists.
+func (r *Real) checkKeyPaths(ctx context.Context, user accounts.User) (bool, error) {
+	if err := checkHome(user.Home); err != nil {
+		return false, err
+	}
+	dir, err := r.lstat(ctx, path.Join(user.Home, SSHDir))
+	if err != nil {
+		return false, err
+	}
+	file := PathState{Kind: KindMissing}
+	if dir.Kind == KindDir {
+		if file, err = r.lstat(ctx, KeysPath(user.Home)); err != nil {
+			return false, err
+		}
+	}
+	if err := CheckKeyPaths(user, dir, file); err != nil {
+		return false, &unsafeKeysError{err: err}
+	}
+	return file.Kind == KindFile, nil
+}
+
+// readKeys reads an account's authorized_keys after checking it, as the
+// account. A missing file reads as fs.ErrNotExist.
+//
+// The read is held to the same rule as the writes because it decides them: the
+// diff is built from it, and a removal writes back everything it returned but
+// one line. Read as root through a swapped name, another account's keys would
+// end up on screen as this one's, and then in this account's file.
+func (r *Real) readKeys(ctx context.Context, user accounts.User) (string, error) {
+	exists, err := r.checkKeyPaths(ctx, user)
+	if err != nil {
+		return "", err
+	}
+	if !exists {
+		return "", fmt.Errorf("%s: %w", KeysPath(user.Home), fs.ErrNotExist)
+	}
+	runuser := r.runners["runuser"]
+	if runuser == nil {
+		// Without runuser nothing is written (see Capabilities), so this read
+		// only ever feeds the detail screen.
+		return r.readFile(ctx, KeysPath(user.Home))
+	}
+	argv, err := BuildReadKeys(user, r.programs)
+	if err != nil {
+		return "", err
+	}
+	return runuser.Read(ctx, argv...)
 }
 
 // LoadUser re-reads one account in full. The list already carries most of it;
@@ -631,8 +766,14 @@ func (r *Real) loadKeys(ctx context.Context, user *accounts.User) {
 		return
 	}
 	user.KeysPath = KeysPath(user.Home)
-	raw, err := r.readFile(ctx, user.KeysPath)
+	raw, err := r.readKeys(ctx, *user)
 	if err != nil {
+		var refused *unsafeKeysError
+		if errors.As(err, &refused) {
+			// The refusal is the answer: an empty list would read as "no keys".
+			user.KeysNote = refused.Error()
+			return
+		}
 		user.KeysNote = keysNote(err, r.root)
 		return
 	}
@@ -838,11 +979,14 @@ func (r *Real) BuildAddKey(user accounts.User, key string) (accounts.KeyPlan, er
 		}
 	}
 
-	before := ""
-	if raw, err := r.readFile(context.Background(), KeysPath(user.Home)); err == nil {
-		before = raw
+	before, err := r.readKeys(context.Background(), user)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		before = ""
+	case err != nil:
+		return accounts.KeyPlan{}, err
 	}
-	return keyAppendPlan(user, key, before)
+	return keyAppendPlan(user, key, before, r.programs)
 }
 
 // keyAppendPlan builds the plan both backends use for an append: make sure the
@@ -852,21 +996,22 @@ func (r *Real) BuildAddKey(user accounts.User, key string) (accounts.KeyPlan, er
 // The file is created with `install -m 600 /dev/null` rather than left to
 // `tee`, because a file tee creates belongs to root with mode 0644 — which
 // sshd accepts and the account's owner cannot then edit.
-func keyAppendPlan(user accounts.User, key, before string) (accounts.KeyPlan, error) {
-	dirCmd, err := BuildEnsureKeysDir(user)
+func keyAppendPlan(user accounts.User, key, before string,
+	programs Programs) (accounts.KeyPlan, error) {
+	dirCmd, err := BuildEnsureKeysDir(user, programs)
 	if err != nil {
 		return accounts.KeyPlan{}, err
 	}
 	commands := []accounts.Command{dirCmd}
 
 	if strings.TrimSpace(before) == "" && before == "" {
-		createCmd, err := BuildCreateKeysFile(user)
+		createCmd, err := BuildCreateKeysFile(user, programs)
 		if err != nil {
 			return accounts.KeyPlan{}, err
 		}
 		commands = append(commands, createCmd)
 	}
-	appendCmd, err := BuildAppendKey(user, key)
+	appendCmd, err := BuildAppendKey(user, key, programs)
 	if err != nil {
 		return accounts.KeyPlan{}, err
 	}
@@ -888,29 +1033,28 @@ func keyAppendPlan(user accounts.User, key, before string) (accounts.KeyPlan, er
 
 // BuildRemoveKey rewrites the authorized_keys file without one key.
 //
-// The rewrite is staged in a private temporary file and installed with the
-// account's own ownership and mode, so the file that lands is the file the diff
-// showed and nothing about it changes but the missing line.
+// The rewrite is installed by the account itself, mode 600, from stdin, so the
+// file that lands is the file the diff showed and nothing about it changes but
+// the missing line.
 func (r *Real) BuildRemoveKey(user accounts.User, key accounts.Key) (accounts.KeyPlan, error) {
-	filePath := KeysPath(user.Home)
-	before, err := r.readFile(context.Background(), filePath)
+	before, err := r.readKeys(context.Background(), user)
 	if err != nil {
 		return accounts.KeyPlan{}, err
 	}
+	return keyRemovePlan(user, key, before, r.programs)
+}
+
+// keyRemovePlan builds the plan both backends use for a removal.
+func keyRemovePlan(user accounts.User, key accounts.Key, before string,
+	programs Programs) (accounts.KeyPlan, error) {
+	filePath := KeysPath(user.Home)
 	after, ok := WithoutKey(before, key)
 	if !ok {
 		return accounts.KeyPlan{}, fmt.Errorf(
 			"shadow: %s no longer holds that key on line %d — reload and try again",
 			filePath, key.Line)
 	}
-	temp, _, err := stageFile(KeysFile, after)
-	if err != nil {
-		return accounts.KeyPlan{}, err
-	}
-	// The staging directory is deliberately not cleaned up here: the install
-	// command that copies from it has not run yet, and it runs only if the
-	// user confirms. It is a private directory under TMPDIR, mode 0700.
-	installCmd, err := BuildInstallKeys(user, temp)
+	installCmd, err := BuildInstallKeys(user, after, programs)
 	if err != nil {
 		return accounts.KeyPlan{}, err
 	}
@@ -918,7 +1062,6 @@ func (r *Real) BuildRemoveKey(user accounts.User, key accounts.Key) (accounts.Ke
 		Path:     filePath,
 		Content:  after,
 		Diff:     Diff(filePath, before, after),
-		TempPath: temp,
 		Commands: []accounts.Command{installCmd},
 	}, nil
 }

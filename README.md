@@ -302,8 +302,10 @@ $ tui-users --check --user ana | grep -A 4 '"Keys"'
 That path is worth naming separately because it is the one that escalates for a
 file it cannot otherwise see: `~/.ssh/authorized_keys` is mode 600 inside a mode
 700 directory owned by somebody else, so reading another account's keys means
-`sudo -n`, and a tool that quietly returned no keys instead would look identical
-to an account that has none.
+`sudo -n runuser -u <user> -- cat`, and a tool that quietly returned no keys
+instead would look identical to an account that has none. A `~/.ssh` or an
+`authorized_keys` that is a symbolic link, or that belongs to another account, is
+not read at all, and the note says so.
 
 A password hash never reaches it. The model carries the *state* of a password —
 usable, locked, empty, never set, unknown — and never the hash, so a `--check`
@@ -373,11 +375,21 @@ Every one of these is previewed and confirmed first.
 | `S` | `gpasswd -a <user> <sudo group>` / `gpasswd -d <user> <sudo group>` |
 | `s` | `usermod -s <shell> <user>` |
 | `e` | `chage -E <date> <user>`, `chage -M <days> <user>` |
-| `K` | `install -d -m 700 -o <user> -g <group> ~/.ssh`, then `tee -a ~/.ssh/authorized_keys`, or `install -m 600 -o <user> -g <group> <staged file> ~/.ssh/authorized_keys` to remove one |
+| `K` | `runuser -u <user> -- install -d -m 700 ~/.ssh`, `runuser -u <user> -- install -m 600 /dev/null ~/.ssh/authorized_keys` when there is none yet, then `runuser -u <user> -- tee -a ~/.ssh/authorized_keys`; or `runuser -u <user> -- install -m 600 /dev/stdin ~/.ssh/authorized_keys` to remove one |
 
 Nothing else. There is no code path that writes to `/etc/sudoers`, and none
 that writes anywhere but an account's own `~/.ssh` — the home directory is
 validated first, and a relative one, `/`, or one carrying `..` is refused.
+
+Every read and write of `~/.ssh` runs **as the account**, through `runuser -u`,
+never as root. The account owns that directory and decides what its names point
+at; run as the account, a command can only reach what the account itself could,
+so a symbolic link cannot carry the write into another account's files.
+`runuser -u` runs the command directly, without a login shell, so accounts whose
+shell is `nologin` work the same way, and root's own keys are written as root.
+Before anything is asked, `~/.ssh` and `authorized_keys` are checked without
+following links: a symbolic link, something that is not a directory or a regular
+file, or a name owned by another account is refused with a message saying which.
 
 ### Sudo is a group, and the machine says which one
 
@@ -642,9 +654,12 @@ widgets, the config loader and the command runner shared by the whole family.
 - An authorized key is validated with `ssh-keygen -lf` — in a private temporary
   file — before any command exists, so a key that cannot be read is refused
   rather than landing in a file where it would sit silently doing nothing.
-- Removing a key rewrites the file through a staged copy installed with the
-  account's own ownership and mode, and refuses if the file changed since it
-  was read.
+- Removing a key rewrites the file with `install -m 600` from standard input,
+  run as the account, and refuses if the file changed since it was read.
+- Key files are only read and written as the account they belong to, and a
+  symlinked or foreign-owned `~/.ssh` or `authorized_keys` is refused. Fix it by
+  hand (replace the link, or `chown` the file to the account) and press `K`
+  again.
 - `tui-users` re-reads the accounts after every change, so what you see is what
   the system reports, not what the tool assumed.
 

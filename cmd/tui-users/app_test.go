@@ -311,8 +311,10 @@ func TestAddingAKeyShowsADiffAndTheCommands(t *testing.T) {
 		t.Fatalf("previewed %d command lines, want the install and the append:\n%s",
 			len(lines), a.confirm.Command)
 	}
-	if !strings.Contains(lines[0], "install -d -m 700 -o alice") ||
-		!strings.Contains(lines[1], "tee -a /home/alice/.ssh/authorized_keys") {
+	// Both run as alice, so neither can be pointed at another account's files.
+	if !strings.Contains(lines[0], "runuser -u alice -- install -d -m 700") ||
+		!strings.Contains(lines[1],
+			"runuser -u alice -- tee -a /home/alice/.ssh/authorized_keys") {
 		t.Errorf("previewed commands = %q", a.confirm.Command)
 	}
 
@@ -349,7 +351,8 @@ func TestRemovingAKeyRewritesTheFile(t *testing.T) {
 	if !strings.Contains(a.confirm.Body, "-ssh-ed25519") {
 		t.Errorf("the dialog does not show the key going:\n%s", a.confirm.Body)
 	}
-	if !strings.Contains(a.confirm.Command, "install -m 600 -o alice -g alice") {
+	if !strings.Contains(a.confirm.Command,
+		"runuser -u alice -- install -m 600 /dev/stdin") {
 		t.Errorf("previewed %q", a.confirm.Command)
 	}
 

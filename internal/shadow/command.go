@@ -459,42 +459,135 @@ func CheckKeyLine(line string) error {
 	return nil
 }
 
-// BuildEnsureKeysDir builds the command that creates ~/.ssh with the mode sshd
-// requires, owned by the account. `install -d` is used rather than mkdir
-// because it sets the mode and the owner in the same call, so there is no
-// window where the directory exists with the wrong permissions.
-func BuildEnsureKeysDir(user accounts.User) (accounts.Command, error) {
+// RunAs is the program every authorized_keys read and write runs through, so
+// it happens with the account's own privileges rather than root's.
+//
+// ~/.ssh and everything in it belong to the account, which means the account
+// decides what those names point at. A write made as root follows whatever is
+// there: a symlinked authorized_keys sends the appended line into another
+// account's file, root's included, and a symlinked ~/.ssh sends the chmod, the
+// chown and the new file into somebody else's directory. Run as the account,
+// the same command can only reach what the account itself could, so the kernel
+// enforces the boundary instead of this tool hoping to. `runuser -u` executes
+// the command directly, without a login shell, so an account whose shell is
+// nologin is handled the same way, and it needs no password because only root
+// may run it — which the tool already is, or escalates to.
+const RunAs = "runuser"
+
+// Programs names the binaries a key-file command runs as the account. runuser
+// finds its command on PATH, so the real backend passes the absolute paths it
+// resolved for its own runners and the preview names exactly the binary that
+// runs; the fake passes the bare names.
+type Programs struct {
+	Install string
+	Tee     string
+	Cat     string
+}
+
+// ProgramNames is the Programs a machine without resolved paths uses: the fake,
+// and the tests.
+var ProgramNames = Programs{Install: "install", Tee: "tee", Cat: "cat"}
+
+// asAccount is the argv that runs a command with an account's privileges.
+func asAccount(user accounts.User, argv ...string) []string {
+	return append([]string{RunAs, "-u", user.Name, "--"}, argv...)
+}
+
+// checkKeysTarget is what every key-file builder checks first: a home that
+// cannot redirect the write, and an account name runuser will take.
+func checkKeysTarget(user accounts.User) error {
 	if err := checkHome(user.Home); err != nil {
-		return accounts.Command{}, err
+		return err
 	}
-	if err := checkName("user", user.Name); err != nil {
+	return checkName("user", user.Name)
+}
+
+// PathKind is what lstat says a path is, without following a symlink.
+type PathKind int
+
+// The kinds a key path can be. Only a directory for ~/.ssh and a regular file
+// for authorized_keys are written through.
+const (
+	KindMissing PathKind = iota
+	KindDir
+	KindFile
+	KindSymlink
+	KindOther
+)
+
+// PathState is one lstat of ~/.ssh or authorized_keys: what the name is and who
+// owns it. It is the name's own state — a symlink is reported as a symlink,
+// never as what it points at.
+type PathState struct {
+	Kind PathKind
+	UID  int
+}
+
+// CheckKeyPaths refuses to touch an account's key files when either name could
+// send a write somewhere else: a symlink, something that is neither a directory
+// nor a regular file, or a name owned by anybody but the account.
+//
+// The commands run as the account, so the kernel would refuse most of these on
+// its own; this check is what turns that into a sentence on the screen before
+// anything is asked, and it also covers the read the diff is built from.
+func CheckKeyPaths(user accounts.User, dir, file PathState) error {
+	dirPath := path.Join(user.Home, SSHDir)
+	if err := checkKeyPath(user, dirPath, dir, KindDir, "a directory"); err != nil {
+		return err
+	}
+	return checkKeyPath(user, KeysPath(user.Home), file, KindFile, "a regular file")
+}
+
+// checkKeyPath checks one of the two names against the kind it has to be.
+func checkKeyPath(user accounts.User, name string, state PathState,
+	want PathKind, wantWords string) error {
+	switch {
+	case state.Kind == KindMissing:
+		return nil
+	case state.Kind == KindSymlink:
+		return fmt.Errorf(
+			"shadow: %s is a symbolic link; refusing to read or write through it "+
+				"(replace it with %s owned by %s)", name, wantWords, user.Name)
+	case state.Kind != want:
+		return fmt.Errorf("shadow: %s is not %s; refusing to touch it",
+			name, wantWords)
+	case state.UID != user.UID:
+		return fmt.Errorf(
+			"shadow: %s belongs to uid %d, not to %s (uid %d); refusing to touch "+
+				"it (chown it to %s first)", name, state.UID, user.Name, user.UID,
+			user.Name)
+	}
+	return nil
+}
+
+// BuildEnsureKeysDir builds the command that creates ~/.ssh with the mode sshd
+// requires. `install -d` sets the mode in the same call that creates the
+// directory, so there is no window where it exists with the wrong permissions;
+// run as the account, the directory is the account's own and so is its group.
+func BuildEnsureKeysDir(user accounts.User, programs Programs) (accounts.Command, error) {
+	if err := checkKeysTarget(user); err != nil {
 		return accounts.Command{}, err
 	}
 	dir := path.Join(user.Home, SSHDir)
 	return accounts.Command{
-		Argv: []string{"install", "-d", "-m", DirMode,
-			"-o", user.Name, "-g", ownerGroup(user), dir},
+		Argv: asAccount(user, programs.Install, "-d", "-m", DirMode, dir),
 		Description: "Make sure " + dir + " exists, mode " + DirMode +
-			", owned by " + user.Name,
+			", as " + user.Name,
 	}, nil
 }
 
 // BuildCreateKeysFile builds the command that creates an empty authorized_keys
-// owned by the account, for the case where there is none yet. Copying
-// /dev/null through `install` is what gets the owner and the mode right in one
-// step; without it `tee` would create the file as root, mode 0644.
-func BuildCreateKeysFile(user accounts.User) (accounts.Command, error) {
-	if err := checkHome(user.Home); err != nil {
-		return accounts.Command{}, err
-	}
-	if err := checkName("user", user.Name); err != nil {
+// for the case where there is none yet. Copying /dev/null through `install` is
+// what gets the mode right in one step; `tee` would leave it to the umask.
+func BuildCreateKeysFile(user accounts.User, programs Programs) (accounts.Command, error) {
+	if err := checkKeysTarget(user); err != nil {
 		return accounts.Command{}, err
 	}
 	file := KeysPath(user.Home)
 	return accounts.Command{
-		Argv: []string{"install", "-m", KeyFileMode, "-o", user.Name,
-			"-g", ownerGroup(user), "/dev/null", file},
-		Description: "Create " + file + ", mode " + KeyFileMode + ", owned by " +
+		Argv: asAccount(user, programs.Install, "-m", KeyFileMode,
+			"/dev/null", file),
+		Description: "Create " + file + ", mode " + KeyFileMode + ", as " +
 			user.Name,
 	}, nil
 }
@@ -502,8 +595,9 @@ func BuildCreateKeysFile(user accounts.User) (accounts.Command, error) {
 // BuildAppendKey builds the append itself. The key travels on stdin, so the
 // command line carries the file and nothing else — a public key is not a
 // secret, but the same rule applies to every input this tool feeds a command.
-func BuildAppendKey(user accounts.User, key string) (accounts.Command, error) {
-	if err := checkHome(user.Home); err != nil {
+func BuildAppendKey(user accounts.User, key string,
+	programs Programs) (accounts.Command, error) {
+	if err := checkKeysTarget(user); err != nil {
 		return accounts.Command{}, err
 	}
 	if err := CheckKeyLine(key); err != nil {
@@ -511,39 +605,44 @@ func BuildAppendKey(user accounts.User, key string) (accounts.Command, error) {
 	}
 	file := KeysPath(user.Home)
 	return accounts.Command{
-		Argv:        []string{"tee", "-a", file},
+		Argv:        asAccount(user, programs.Tee, "-a", file),
 		Stdin:       strings.TrimSpace(key) + "\n",
-		Description: "Append the key to " + file,
+		Description: "Append the key to " + file + ", as " + user.Name,
 		Destructive: true,
 	}, nil
 }
 
-// BuildInstallKeys builds the command that replaces an authorized_keys file
-// with a staged copy, which is how a key is removed: the file is rewritten
-// without it, and the diff is shown before anything is installed.
-func BuildInstallKeys(user accounts.User, tempPath string) (accounts.Command, error) {
-	if err := checkHome(user.Home); err != nil {
-		return accounts.Command{}, err
-	}
-	if err := checkName("user", user.Name); err != nil {
+// BuildInstallKeys builds the command that replaces an authorized_keys file,
+// which is how a key is removed: the file is rewritten without it, and the diff
+// is shown before anything is installed.
+//
+// The new content travels on stdin. A staged copy in this tool's own private
+// temporary directory is exactly what the account must not be able to read,
+// and the account is who runs the install. `install` replaces the name rather
+// than writing through it, so the file that lands is a new regular file.
+func BuildInstallKeys(user accounts.User, content string,
+	programs Programs) (accounts.Command, error) {
+	if err := checkKeysTarget(user); err != nil {
 		return accounts.Command{}, err
 	}
 	file := KeysPath(user.Home)
 	return accounts.Command{
-		Argv: []string{"install", "-m", KeyFileMode, "-o", user.Name,
-			"-g", ownerGroup(user), tempPath, file},
-		Description: "Install the rewritten " + file,
+		Argv: asAccount(user, programs.Install, "-m", KeyFileMode,
+			"/dev/stdin", file),
+		Stdin:       content,
+		Description: "Install the rewritten " + file + ", as " + user.Name,
 		Destructive: true,
 	}, nil
 }
 
-// ownerGroup is the group an account's files belong to: its primary group by
-// name, or the numeric GID when no group carries it.
-func ownerGroup(user accounts.User) string {
-	if nameRe.MatchString(user.PrimaryGroup) {
-		return user.PrimaryGroup
+// BuildReadKeys builds the read of an authorized_keys file, as the account.
+// What it returns is what the diff is built from and what a removal writes
+// back, so it is held to the same rule as the writes.
+func BuildReadKeys(user accounts.User, programs Programs) ([]string, error) {
+	if err := checkKeysTarget(user); err != nil {
+		return nil, err
 	}
-	return strconv.Itoa(user.GID)
+	return asAccount(user, programs.Cat, "--", KeysPath(user.Home)), nil
 }
 
 // WithoutKey returns the file text with one line removed, and reports whether
