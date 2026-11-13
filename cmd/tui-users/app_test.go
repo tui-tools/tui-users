@@ -352,13 +352,18 @@ func TestRemovingAKeyRewritesTheFile(t *testing.T) {
 		t.Errorf("the dialog does not show the key going:\n%s", a.confirm.Body)
 	}
 	if !strings.Contains(a.confirm.Command,
-		"runuser -u alice -- install -m 600 /dev/stdin") {
+		"runuser -u alice -- tee /home/alice/.ssh/authorized_keys") {
 		t.Errorf("previewed %q", a.confirm.Command)
 	}
 
 	drain(t, a, press(a, "y"))
 	if len(backend.Ran()) != 1 {
 		t.Fatalf("ran %v", backend.Ran())
+	}
+	// tee echoes the file it rewrote, which is the keys that stay: the status
+	// line must not read as if one of those were the key removed.
+	if strings.Contains(a.status, "ssh-") {
+		t.Errorf("status echoes a remaining key: %q", a.status)
 	}
 	// The demo machine applies the command, so the key is really gone.
 	openDetailFor(t, a, "alice")

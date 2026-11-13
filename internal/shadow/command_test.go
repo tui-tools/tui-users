@@ -447,16 +447,24 @@ func TestKeyCommandsRunAsTheAccount(t *testing.T) {
 		t.Errorf("stdin = %q", appendCmd.Stdin)
 	}
 
-	// A removal is installed from stdin: the account cannot read this tool's
-	// private staging directory, and must not be able to.
+	// A removal is written from stdin by tee, which reads the descriptor it
+	// was handed. The account cannot read this tool's private staging
+	// directory, and it cannot reopen /dev/stdin either: the pipe belongs to
+	// root (or to the admin behind sudo), so `install /dev/stdin` run as the
+	// account fails with EACCES after it has already unlinked the file.
 	install, err := BuildInstallKeys(alice, "ssh-ed25519 AAAA kept\n", ProgramNames)
 	if err != nil {
 		t.Fatalf("BuildInstallKeys: %v", err)
 	}
-	want = "runuser -u alice -- install -m 600 /dev/stdin " +
-		"/home/alice/.ssh/authorized_keys"
+	want = "runuser -u alice -- tee /home/alice/.ssh/authorized_keys"
 	if got := install.String(); got != want {
 		t.Errorf("argv %q, want %q", got, want)
+	}
+	for _, arg := range install.Argv {
+		if arg == "/dev/stdin" || arg == "/proc/self/fd/0" {
+			t.Errorf("%q makes the account reopen a pipe it does not own",
+				install.String())
+		}
 	}
 	if install.Stdin != "ssh-ed25519 AAAA kept\n" {
 		t.Errorf("stdin = %q", install.Stdin)

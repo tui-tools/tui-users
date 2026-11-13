@@ -616,10 +616,18 @@ func BuildAppendKey(user accounts.User, key string,
 // which is how a key is removed: the file is rewritten without it, and the diff
 // is shown before anything is installed.
 //
-// The new content travels on stdin. A staged copy in this tool's own private
-// temporary directory is exactly what the account must not be able to read,
-// and the account is who runs the install. `install` replaces the name rather
-// than writing through it, so the file that lands is a new regular file.
+// The new content travels on stdin and is written by `tee`, which reads the
+// descriptor it was handed. A staged copy in this tool's own private temporary
+// directory is exactly what the account must not be able to read, and the
+// account is who runs the write. Naming /dev/stdin to `install` does not work
+// either: it reopens the pipe through /proc/self/fd/0, the kernel checks that
+// open against the pipe's owner (root, or the admin behind sudo), and the
+// account gets EACCES — after install has already unlinked the old file.
+//
+// The file was checked to be a regular file owned by the account just before
+// the plan was built, so it keeps the mode the account gave it; tee only
+// replaces its content. Run as the account, a name swapped in the meantime
+// can only lead somewhere the account could already write.
 func BuildInstallKeys(user accounts.User, content string,
 	programs Programs) (accounts.Command, error) {
 	if err := checkKeysTarget(user); err != nil {
@@ -627,10 +635,9 @@ func BuildInstallKeys(user accounts.User, content string,
 	}
 	file := KeysPath(user.Home)
 	return accounts.Command{
-		Argv: asAccount(user, programs.Install, "-m", KeyFileMode,
-			"/dev/stdin", file),
+		Argv:        asAccount(user, programs.Tee, file),
 		Stdin:       content,
-		Description: "Install the rewritten " + file + ", as " + user.Name,
+		Description: "Rewrite " + file + " from standard input, as " + user.Name,
 		Destructive: true,
 	}, nil
 }

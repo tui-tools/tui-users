@@ -146,6 +146,10 @@ type ranMsg struct {
 type plan struct {
 	title    string
 	commands []accounts.Command
+	// quiet drops what the commands print from the status line. A key
+	// removal rewrites the file with tee, which echoes the keys that stay;
+	// shown after "Remove an authorized key", that reads as the wrong key.
+	quiet bool
 }
 
 // newApp builds the model around a backend.
@@ -206,7 +210,7 @@ func (a *app) run(p plan) tea.Cmd {
 			if err != nil {
 				return ranMsg{title: p.title, output: out, err: err}
 			}
-			if trimmed := strings.TrimSpace(out); trimmed != "" {
+			if trimmed := strings.TrimSpace(out); trimmed != "" && !p.quiet {
 				outputs = append(outputs, trimmed)
 			}
 		}
@@ -1355,7 +1359,7 @@ func (a *app) confirmRemoveKey(label string) tea.Cmd {
 		Body:    a.diffForDialog(plan.Diff),
 		Command: a.previewAll(plan.Commands),
 		Danger:  true,
-		Payload: planFor("Remove an authorized key", plan),
+		Payload: quietPlan(planFor("Remove an authorized key", plan)),
 	}
 	return nil
 }
@@ -1363,6 +1367,12 @@ func (a *app) confirmRemoveKey(label string) tea.Cmd {
 // planFor turns a key plan into the confirm dialog's payload.
 func planFor(title string, keys accounts.KeyPlan) plan {
 	return plan{title: title, commands: keys.Commands}
+}
+
+// quietPlan marks a plan whose output is not worth a status line.
+func quietPlan(p plan) plan {
+	p.quiet = true
+	return p
 }
 
 // openPicker opens a picker and remembers what it is choosing.
