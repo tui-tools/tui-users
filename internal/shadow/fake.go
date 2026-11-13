@@ -619,8 +619,14 @@ func (f *Fake) install(argv []string, stdin string) (string, error) {
 	return "", nil
 }
 
-// appendFile applies a `tee -a`: the stdin is appended to the file.
+// appendFile applies a `tee -a`, which appends the stdin to the file, or a
+// plain `tee`, which replaces the file's content with it.
 func (f *Fake) appendFile(argv []string, stdin string) (string, error) {
+	if len(argv) == 2 && argv[1] != "-a" {
+		f.files[argv[1]] = stdin
+		// tee echoes what it wrote, which is what the real one does.
+		return strings.TrimSpace(stdin), nil
+	}
 	if len(argv) < 3 {
 		return "", fmt.Errorf("tee: no file given")
 	}

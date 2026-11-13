@@ -375,7 +375,7 @@ Every one of these is previewed and confirmed first.
 | `S` | `gpasswd -a <user> <sudo group>` / `gpasswd -d <user> <sudo group>` |
 | `s` | `usermod -s <shell> <user>` |
 | `e` | `chage -E <date> <user>`, `chage -M <days> <user>` |
-| `K` | `runuser -u <user> -- install -d -m 700 ~/.ssh`, `runuser -u <user> -- install -m 600 /dev/null ~/.ssh/authorized_keys` when there is none yet, then `runuser -u <user> -- tee -a ~/.ssh/authorized_keys`; or `runuser -u <user> -- install -m 600 /dev/stdin ~/.ssh/authorized_keys` to remove one |
+| `K` | `runuser -u <user> -- install -d -m 700 ~/.ssh`, `runuser -u <user> -- install -m 600 /dev/null ~/.ssh/authorized_keys` when there is none yet, then `runuser -u <user> -- tee -a ~/.ssh/authorized_keys`; or `runuser -u <user> -- tee ~/.ssh/authorized_keys` (the rewritten file on stdin) to remove one |
 
 Nothing else. There is no code path that writes to `/etc/sudoers`, and none
 that writes anywhere but an account's own `~/.ssh` — the home directory is
