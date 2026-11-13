@@ -1,6 +1,7 @@
 package shadow
 
 import (
+	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
@@ -594,4 +595,25 @@ func Flags(user accounts.User, limits accounts.Limits) []accounts.Flag {
 		})
 	}
 	return flags
+}
+
+// ParseStat reads the `stat -c '%u %F'` line of one path — its owner's uid and
+// the file type in words — into a PathState. Without -L, stat describes the
+// name itself, so a symlink comes back as "symbolic link".
+func ParseStat(out string) (PathState, error) {
+	uidText, kind, ok := strings.Cut(strings.TrimSpace(out), " ")
+	uid, err := strconv.Atoi(uidText)
+	if !ok || err != nil {
+		return PathState{}, fmt.Errorf("shadow: unexpected stat output %q", out)
+	}
+	state := PathState{Kind: KindOther, UID: uid}
+	switch kind {
+	case "directory":
+		state.Kind = KindDir
+	case "regular file", "regular empty file":
+		state.Kind = KindFile
+	case "symbolic link":
+		state.Kind = KindSymlink
+	}
+	return state, nil
 }

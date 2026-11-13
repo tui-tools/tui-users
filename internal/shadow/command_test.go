@@ -409,40 +409,95 @@ func TestCheckKeyLine(t *testing.T) {
 	}
 }
 
-// TestKeyCommandsAreOwnedByTheAccount covers the part that is easy to get
-// wrong: a file `tee` creates belongs to root, mode 0644, in somebody else's
-// home directory.
-func TestKeyCommandsAreOwnedByTheAccount(t *testing.T) {
-	dir, err := BuildEnsureKeysDir(alice)
+// TestKeyCommandsRunAsTheAccount covers the part that is easy to get wrong:
+// every read and write of ~/.ssh happens with the account's own privileges, so
+// a name the account pointed somewhere else cannot carry root's write with it.
+func TestKeyCommandsRunAsTheAccount(t *testing.T) {
+	dir, err := BuildEnsureKeysDir(alice, ProgramNames)
 	if err != nil {
 		t.Fatalf("BuildEnsureKeysDir: %v", err)
 	}
-	want := "install -d -m 700 -o alice -g alice /home/alice/.ssh"
+	want := "runuser -u alice -- install -d -m 700 /home/alice/.ssh"
 	if got := dir.String(); got != want {
 		t.Errorf("argv %q, want %q", got, want)
 	}
 
-	create, err := BuildCreateKeysFile(alice)
+	create, err := BuildCreateKeysFile(alice, ProgramNames)
 	if err != nil {
 		t.Fatalf("BuildCreateKeysFile: %v", err)
 	}
-	want = "install -m 600 -o alice -g alice /dev/null " +
+	want = "runuser -u alice -- install -m 600 /dev/null " +
 		"/home/alice/.ssh/authorized_keys"
 	if got := create.String(); got != want {
 		t.Errorf("argv %q, want %q", got, want)
 	}
 
 	appendCmd, err := BuildAppendKey(alice,
-		"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJk3fixture000000 alice@laptop")
+		"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJk3fixture000000 alice@laptop",
+		ProgramNames)
 	if err != nil {
 		t.Fatalf("BuildAppendKey: %v", err)
 	}
-	if got := appendCmd.String(); got != "tee -a /home/alice/.ssh/authorized_keys" {
-		t.Errorf("argv %q", got)
+	want = "runuser -u alice -- tee -a /home/alice/.ssh/authorized_keys"
+	if got := appendCmd.String(); got != want {
+		t.Errorf("argv %q, want %q", got, want)
 	}
 	if !strings.HasSuffix(appendCmd.Stdin, "\n") ||
 		!strings.HasPrefix(appendCmd.Stdin, "ssh-ed25519 ") {
 		t.Errorf("stdin = %q", appendCmd.Stdin)
+	}
+
+	// A removal is installed from stdin: the account cannot read this tool's
+	// private staging directory, and must not be able to.
+	install, err := BuildInstallKeys(alice, "ssh-ed25519 AAAA kept\n", ProgramNames)
+	if err != nil {
+		t.Fatalf("BuildInstallKeys: %v", err)
+	}
+	want = "runuser -u alice -- install -m 600 /dev/stdin " +
+		"/home/alice/.ssh/authorized_keys"
+	if got := install.String(); got != want {
+		t.Errorf("argv %q, want %q", got, want)
+	}
+	if install.Stdin != "ssh-ed25519 AAAA kept\n" {
+		t.Errorf("stdin = %q", install.Stdin)
+	}
+
+	read, err := BuildReadKeys(alice, ProgramNames)
+	if err != nil {
+		t.Fatalf("BuildReadKeys: %v", err)
+	}
+	want = "runuser -u alice -- cat -- /home/alice/.ssh/authorized_keys"
+	if got := strings.Join(read, " "); got != want {
+		t.Errorf("argv %q, want %q", got, want)
+	}
+
+	// No command chowns anything: the account creates its own files, and a
+	// chown is exactly what a redirected name would have turned against
+	// somebody else's directory.
+	for _, cmd := range []accounts.Command{dir, create, appendCmd, install} {
+		for _, arg := range cmd.Argv {
+			if arg == "-o" || arg == "-g" {
+				t.Errorf("%q still sets an owner", cmd.String())
+			}
+		}
+	}
+}
+
+// TestKeyCommandsUseTheResolvedPrograms keeps the preview honest: runuser looks
+// its command up on PATH, so the real backend hands it the absolute path it
+// resolved, and the argv shows that path.
+func TestKeyCommandsUseTheResolvedPrograms(t *testing.T) {
+	programs := Programs{Install: "/usr/bin/install", Tee: "/usr/bin/tee",
+		Cat: "/usr/bin/cat"}
+	appendCmd, err := BuildAppendKey(alice,
+		"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJk3fixture000000 alice@laptop",
+		programs)
+	if err != nil {
+		t.Fatalf("BuildAppendKey: %v", err)
+	}
+	want := "runuser -u alice -- /usr/bin/tee -a /home/alice/.ssh/authorized_keys"
+	if got := appendCmd.String(); got != want {
+		t.Errorf("argv %q, want %q", got, want)
 	}
 }
 
@@ -454,12 +509,92 @@ func TestKeyCommandsRefuseAnImpossibleHome(t *testing.T) {
 		"/home/with space"} {
 		user := alice
 		user.Home = home
-		if _, err := BuildEnsureKeysDir(user); err == nil {
+		if _, err := BuildEnsureKeysDir(user, ProgramNames); err == nil {
 			t.Errorf("BuildEnsureKeysDir accepted the home %q", home)
 		}
-		if _, err := BuildInstallKeys(user, "/tmp/x"); err == nil {
+		if _, err := BuildInstallKeys(user, "", ProgramNames); err == nil {
 			t.Errorf("BuildInstallKeys accepted the home %q", home)
 		}
+		if _, err := BuildReadKeys(user, ProgramNames); err == nil {
+			t.Errorf("BuildReadKeys accepted the home %q", home)
+		}
+	}
+	// The account name ends up after runuser -u, so it is held to the same
+	// shape as everywhere else.
+	user := alice
+	user.Name = "-oops"
+	if _, err := BuildAppendKey(user,
+		"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJk3fixture000000 x", ProgramNames); err == nil {
+		t.Error("BuildAppendKey accepted the account name -oops")
+	}
+}
+
+// TestCheckKeyPaths covers the refusals: a name that could send a read or a
+// write somewhere other than the account's own ~/.ssh.
+func TestCheckKeyPaths(t *testing.T) {
+	dir := func(uid int) PathState { return PathState{Kind: KindDir, UID: uid} }
+	file := func(uid int) PathState { return PathState{Kind: KindFile, UID: uid} }
+	missing := PathState{Kind: KindMissing}
+	link := PathState{Kind: KindSymlink, UID: 1000}
+	root := alice
+	root.Name, root.UID, root.Home = "root", 0, "/root"
+
+	tests := []struct {
+		name      string
+		user      accounts.User
+		dir, file PathState
+		want      string // empty: accepted
+	}{
+		{name: "nothing there yet", user: alice, dir: missing, file: missing},
+		{name: "a directory, no file", user: alice, dir: dir(1000), file: missing},
+		{name: "both the account's", user: alice, dir: dir(1000), file: file(1000)},
+		{name: "root's own keys", user: root, dir: dir(0), file: file(0)},
+		{name: "symlinked file", user: alice, dir: dir(1000), file: link,
+			want: "/home/alice/.ssh/authorized_keys is a symbolic link"},
+		{name: "symlinked directory", user: alice, dir: link, file: missing,
+			want: "/home/alice/.ssh is a symbolic link"},
+		{name: "directory owned by root", user: alice, dir: dir(0), file: missing,
+			want: "/home/alice/.ssh belongs to uid 0, not to alice (uid 1000)"},
+		{name: "file owned by somebody else", user: alice, dir: dir(1000),
+			file: file(1001),
+			want: "/home/alice/.ssh/authorized_keys belongs to uid 1001"},
+		{name: "a file where the directory goes", user: alice, dir: file(1000),
+			file: missing, want: "/home/alice/.ssh is not a directory"},
+		{name: "a fifo where the file goes", user: alice, dir: dir(1000),
+			file: PathState{Kind: KindOther, UID: 1000},
+			want: "/home/alice/.ssh/authorized_keys is not a regular file"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := CheckKeyPaths(tc.user, tc.dir, tc.file)
+			switch {
+			case tc.want == "" && err != nil:
+				t.Errorf("refused: %v", err)
+			case tc.want != "" && err == nil:
+				t.Errorf("accepted, want a refusal containing %q", tc.want)
+			case tc.want != "" && !strings.Contains(err.Error(), tc.want):
+				t.Errorf("error %q does not contain %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestParseStat(t *testing.T) {
+	tests := map[string]PathState{
+		"1000 directory":          {Kind: KindDir, UID: 1000},
+		"0 regular file":          {Kind: KindFile, UID: 0},
+		"1000 regular empty file": {Kind: KindFile, UID: 1000},
+		"1000 symbolic link":      {Kind: KindSymlink, UID: 1000},
+		"1000 fifo":               {Kind: KindOther, UID: 1000},
+	}
+	for out, want := range tests {
+		got, err := ParseStat(out + "\n")
+		if err != nil || got != want {
+			t.Errorf("ParseStat(%q) = %+v, %v; want %+v", out, got, err, want)
+		}
+	}
+	if _, err := ParseStat("stat: cannot statx"); err == nil {
+		t.Error("ParseStat accepted an error message")
 	}
 }
 
