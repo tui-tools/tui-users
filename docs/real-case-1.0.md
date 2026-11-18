@@ -58,3 +58,30 @@ through `sudo -n`. Nothing was changed on that machine.
 
 Group creation and deletion, the expiry form (`e`), the shell form (`s`) and
 the sudo rules screen were not exercised on this machine.
+
+## Second run: tui-kit v0.5.0, on all three families
+
+tui-kit v0.5.0 changed how a command runs as root: it is looked up only in the
+system directories and must be owned by root, it starts from a minimal
+environment, and as root the tool refuses configuration files root does not
+own and `TUI_<TOOL>_*` variables carried in from sudo, su, doas or pkexec. So
+the work above was repeated on 2026-11-18 with a static build of this branch's
+head, `da6f694` (main with tui-kit v0.5.0 and Go 1.27.4 merged in, and #32 merged on top),
+installed root-owned as `/usr/local/bin/tui-users`, on fresh tui-lab machines on
+the project's own server: Ubuntu 24.04.5 (apt), Fedora 44 (dnf) and Omarchy
+Server 4.0.1 (pacman), lab VMs again, not production hosts.
+
+- The smoke test passed on all three as the ordinary user `lab`, who
+  escalates with `sudo -n`, and again as root (`sudo env TUI_LAB_BIN=<binary> bash smoke.sh`):
+  26/26 on each, as user and as root. On Omarchy Server the escalation and every command it runs were
+  found through `/usr/sbin`, which the new kit trusts; nothing was refused.
+- The main change was driven through the TUI in tmux once per family as
+  `lab` and once as root, and checked on the machine afterwards:
+  an account created with `n` (`useradd`), found by `getent`, then deleted
+  with its home through `D` (`userdel -r`), on all three.
+- tui-update then upgraded all three machines (see its report), Omarchy
+  Server to 4.0.2. The smoke test passed again on the upgraded machines, and
+  the new versions it observed are the 2026-11-18 lines in
+  `compat/results.jsonl` (OpenSSH 10.6 on Omarchy Server 4.0.2).
+
+No new finding.
