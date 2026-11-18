@@ -4,8 +4,11 @@
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/14368/badge)](https://www.bestpractices.dev/projects/14368)
 
 <!-- stability:start -->
-> **Beta** tools may still change keys, flags or output before their 1.0;
-> stable tools follow semver. Pin versions, and report what breaks.
+> **Stable since v1.0.0.** Keys, flags and the `--check` JSON follow semver:
+> anything new arrives in a minor release, and a removal or a change of meaning
+> waits for the next major, announced one minor before. What stable means: [the
+> family's
+> bar](https://github.com/tui-tools/tui-kit/blob/main/docs/stability.md).
 <!-- stability:end -->
 
 A terminal UI for the machine's local accounts. It shows who exists, what each
@@ -19,9 +22,9 @@ different terminals. `tui-users` puts them on one screen, in the
 
 ![The accounts table](docs/screenshots/tui-users-main.png)
 
-> **Status: early, under validation.** An independent tool that follows the
-> Omarchy visual style; it is **not** part of the Omarchy project and not
-> endorsed by its maintainers. Expect rough edges.
+> An independent tool that follows the [Omarchy](https://omarchy.org) visual
+> style; it is not part of the Omarchy project and not endorsed by its
+> maintainers.
 
 ## Install
 
@@ -150,7 +153,7 @@ Upgrades then arrive with the rest of your system updates.
 ### Any distribution, static binary
 
 ```sh
-curl -fsSL https://github.com/tui-tools/tui-users/releases/download/v0.2.4/tui-users_0.2.4_linux_amd64.tar.gz | tar -xz tui-users
+curl -fsSL https://github.com/tui-tools/tui-users/releases/download/v1.0.0/tui-users_1.0.0_linux_amd64.tar.gz | tar -xz tui-users
 sudo install -m0755 tui-users /usr/local/bin/tui-users
 ```
 
@@ -382,6 +385,42 @@ them. Three reads do: `/etc/shadow`, the sudoers files, and another account's
 `chage -l`. Those and every change use `sudo -n`, which never prompts, so run
 `sudo -v` in another terminal first, or start `tui-users` with sudo.
 
+## Stability
+
+tui-users is stable since 1.0.0 and follows [semver](https://semver.org). What
+is frozen is the contract a script or a habit can depend on:
+
+- the keys: every key the help screen (`?`) and [Keys](#keys) list, on the
+  accounts, groups and sudo screens and the detail screens, and in the forms
+  (`tab`, `shift+tab`, `←`/`→`, `enter`, `esc`);
+- the flags: `--check`, `--user`, `--demo`, `--report`, `--sudo`, `--theme`
+  and `--version`, and the `TUI_USERS_*` configuration keys (`sudo`, `theme`);
+- the `--check` JSON: every field name and what it means. At the top level:
+  `tool`, `version`, `backend`, `describe`, `root`, `shadowRead`, `shadowNote`,
+  the counts (`users`, `humans`, `system`, `groups`, `sessions`,
+  `sudoersFiles`, `noPasswdRules`), `flagged`, `compat`, and `detail` when
+  `--user` named an account. Each `flagged` row: `user`, `uid`, `severity`,
+  `reason`. `compat`: `backend`, `version`, `minimum`, `status`, and `notes`
+  and `detail` when there are any. A field that is left out when empty is left
+  out on purpose, and that is part of its meaning.
+
+Two fields are not part of the contract: `model`, the parsed state in full, and
+what `detail` carries inside it, which is one account in the model's own shape.
+Both are diagnostic dumps whose shape follows the code; that `detail` is there
+exactly when `--user` names an account on the machine, and that a name which
+is not there is an error, is frozen. A script that needs one of their values
+should ask for a field of its own, which a minor release can add.
+
+A minor release only adds: new keys, new flags, new `--check` fields. Removing
+or renaming one, or changing what it means, happens only in a major release,
+and the minor release before that major warns about it, on screen and in
+`--check`. The commands a key previews may gain a safer flag or a check in a
+minor release; what they change on the machine does not. The bar a tool in the
+family meets to be called stable is in [tui-kit's stability
+page](https://github.com/tui-tools/tui-kit/blob/main/docs/stability.md); the
+real machine this tool drove for it is described in
+[docs/real-case-1.0.md](docs/real-case-1.0.md).
+
 ## What it can do to your machine
 
 Every one of these is previewed and confirmed first.
@@ -481,7 +520,7 @@ cancels.
 
 ![Help](docs/screenshots/tui-users-help.png)
 
-## What v0.1 can do
+## What it can do
 
 - Read every account from `getent passwd`, every group from `getent group`, and
   the password state and aging of each from `getent shadow` when it can.
@@ -504,7 +543,7 @@ cancels.
 - Put the accounts worth a second look at the top, with the reason.
 - Follow the active Omarchy theme, and respect `NO_COLOR`.
 
-## What v0.1 cannot do
+## What it cannot do
 
 - **No sudoers editing.** The rules are read and shown; changing one is
   `visudo`'s job, because a syntactically invalid sudoers file locks everybody
@@ -555,7 +594,7 @@ hidden; one below the minimum is marked as such and the tool still runs.
 | Binary | `ssh-keygen` |
 | Version read with | `ssh -V` |
 | Minimum | 8.2 |
-| Tested | `9.6`, `10.2`, `10.5` |
+| Tested | `9.6`, `10.2`, `10.5`, `10.6` |
 | Version-gated features | `security-keys` (since 8.2) |
 
 | Versions | What changes |
