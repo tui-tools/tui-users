@@ -456,6 +456,9 @@ func ParseLoginctl(out string) []accounts.Session {
 			// a line without it is a header or a summary.
 			continue
 		}
+		if managerSession(fields[3:]) {
+			continue
+		}
 		session := accounts.Session{ID: fields[0], User: fields[2]}
 		for _, field := range fields[3:] {
 			switch {
@@ -470,6 +473,21 @@ func ParseLoginctl(out string) []accounts.Session {
 		sessions = append(sessions, session)
 	}
 	return sessions
+}
+
+// managerSession reports a row whose CLASS column, printed since systemd 256,
+// says it is an account's service manager (user@UID.service) rather than a
+// login. It outlives the login by a few seconds, so counting it would show an
+// account as logged in after it has logged out:
+//
+//	20 1001 ana - 12275 manager - no -
+func managerSession(rest []string) bool {
+	for _, field := range rest {
+		if field == "manager" || field == "manager-early" {
+			return true
+		}
+	}
+	return false
 }
 
 // ParseLoginDefs reads the UID and GID ranges out of /etc/login.defs. They are

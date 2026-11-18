@@ -453,3 +453,18 @@ func TestSortUsersPutsFindingsFirst(t *testing.T) {
 		last = user.UID
 	}
 }
+
+// TestParseLoginctlSkipsServiceManagers: systemd 256 and later list each
+// account's service manager as a session of class manager, and keep it for a
+// few seconds after the login ends. Captured on Fedora 44 (systemd 259) while
+// ana was logged in over SSH: two logins, three service managers.
+func TestParseLoginctlSkipsServiceManagers(t *testing.T) {
+	sessions := ParseLoginctl(read(t, "loginctl-systemd259.txt"))
+	if len(sessions) != 2 {
+		t.Fatalf("got %d sessions, want the 2 logins: %+v", len(sessions), sessions)
+	}
+	if sessions[0].ID != "1" || sessions[0].User != "lab" ||
+		sessions[1].ID != "19" || sessions[1].User != "ana" {
+		t.Errorf("sessions = %+v", sessions)
+	}
+}
