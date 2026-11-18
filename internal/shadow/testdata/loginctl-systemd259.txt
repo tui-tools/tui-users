@@ -1,0 +1,5 @@
+ 1 1000 lab - 1126  user    - no -
+19 1001 ana - 12270 user    - no -
+ 2 1000 lab - 1132  manager - no -
+20 1001 ana - 12275 manager - no -
+18    0 root - 12056 manager-early - no -

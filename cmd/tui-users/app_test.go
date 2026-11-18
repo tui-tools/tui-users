@@ -893,3 +893,27 @@ func TestHelpListsEveryActionKey(t *testing.T) {
 		}
 	}
 }
+
+// TestRereadOnTheDetailScreenStartsFromAFreshRead: R on an account's detail
+// screen reads the machine again and the account from that read, so what the
+// screen held before (here a session that has since ended) does not survive.
+func TestRereadOnTheDetailScreenStartsFromAFreshRead(t *testing.T) {
+	a, _ := newTestApp(t)
+	openDetailFor(t, a, "bob")
+	a.detail.Sessions = append(a.detail.Sessions,
+		accounts.Session{ID: "99", User: "bob"})
+
+	drain(t, a, press(a, "R"))
+	if a.mode != modeUserDetail || a.detail.Name != "bob" {
+		t.Fatalf("R left the detail screen (mode %v, account %q)", a.mode, a.detail.Name)
+	}
+	for _, session := range a.detail.Sessions {
+		if session.ID == "99" {
+			t.Errorf("a session that is not on the machine survived R: %+v",
+				a.detail.Sessions)
+		}
+	}
+	if !a.detail.Detailed {
+		t.Errorf("the account was not read in full again")
+	}
+}
