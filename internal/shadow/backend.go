@@ -700,6 +700,13 @@ func (r *Real) LoadUser(ctx context.Context, user accounts.User) (accounts.User,
 		return user, err
 	}
 	user.Detailed = true
+	// Every per-account answer below is asked again, so whatever an earlier
+	// read left in them goes first. Sessions are appended and a refused key
+	// or sudo read only sets a note, so without this a session that ended, or
+	// a key that was removed, would stay on the detail screen after a re-read.
+	user.Sessions = nil
+	user.Keys, user.KeysPath, user.KeysNote = nil, "", ""
+	user.Sudo.Rules, user.Sudo.NoPasswd, user.Sudo.Note = nil, false, ""
 
 	if id := r.runners["id"]; id != nil {
 		// The system's own answer, which folds in every NSS source rather than

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tui-tools/tui-kit/runner"
 	"github.com/tui-tools/tui-users/internal/accounts"
@@ -256,5 +257,52 @@ func mustSymlink(t *testing.T, target, name string) {
 	t.Helper()
 	if err := os.Symlink(target, name); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestLoadUserForgetsWhatAnEarlierReadLeft: the detail screen re-reads an
+// account it already holds, so LoadUser gets a user whose sessions, keys and
+// sudo rules came from the last read. A session that has ended since must not
+// survive the re-read, and neither must keys or rules the new read did not
+// find. Seen on a real machine: an SSH login that had closed stayed listed,
+// and the delete key refused the account as logged in.
+func TestLoadUserForgetsWhatAnEarlierReadLeft(t *testing.T) {
+	dir := t.TempDir()
+	loginctl := filepath.Join(dir, "loginctl")
+	// Only another account is logged in now.
+	writeFile(t, loginctl, "#!/bin/sh\necho ' 1 1000 lab - 1126 user - no -'\n")
+	// The stand-in has to be executable to be run as loginctl.
+	if err := os.Chmod(loginctl, 0o700); err != nil { //nolint:gosec // a stand-in run as loginctl must be executable
+		t.Fatal(err)
+	}
+	backend := &Real{
+		runners: map[string]*runner.Runner{
+			"loginctl": {Bin: loginctl, Name: "loginctl", Timeout: 5 * time.Second},
+		},
+		programs: ProgramNames,
+	}
+	stale := accounts.User{
+		Name: "ana", UID: 1001,
+		Sessions: []accounts.Session{{ID: "11", User: "ana"}},
+		Keys:     []accounts.Key{{Line: 1, Raw: strings.TrimSpace(newKey)}},
+		KeysPath: "/home/ana/.ssh/authorized_keys",
+		Sudo:     accounts.Sudo{Groups: []string{"wheel"}, Rules: []string{"(ALL) ALL"}},
+	}
+
+	user, err := backend.LoadUser(context.Background(), stale)
+	if err != nil {
+		t.Fatalf("LoadUser: %v", err)
+	}
+	if len(user.Sessions) != 0 {
+		t.Errorf("sessions after the re-read = %+v, want none", user.Sessions)
+	}
+	if len(user.Keys) != 0 {
+		t.Errorf("keys after a re-read that found none = %+v", user.Keys)
+	}
+	if len(user.Sudo.Rules) != 0 {
+		t.Errorf("sudo rules after a re-read that asked nothing = %v", user.Sudo.Rules)
+	}
+	if len(user.Sudo.Groups) != 1 {
+		t.Errorf("the list read's sudo groups were dropped: %v", user.Sudo.Groups)
 	}
 }

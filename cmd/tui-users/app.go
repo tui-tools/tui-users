@@ -632,7 +632,12 @@ func (a *app) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		a.detailOffset = max(a.detailOffset-a.detailHeight(), 0)
 		return a, nil
 	case "R", "ctrl+r":
-		return a, a.loadDetail(a.detail)
+		// The whole machine is read again, and the account with it from that
+		// fresh read: re-reading only this account from what is on screen
+		// would carry over whatever the screen already held, such as a
+		// session that has since ended.
+		a.loading = true
+		return a, a.load()
 	default:
 		return a, a.handleActionKey(msg)
 	}
